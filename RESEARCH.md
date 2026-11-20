@@ -2523,4 +2523,198 @@ All re-searched topics confirmed zero contradictions with rounds 1-37:
 - HX-241 rate limiting via token bucket (ITU-T Y.1221) + throughput advice (SCONE)
 - HX-241 congestion control via ECN/QCN/DCQCN rate-based without IP
 
+---
+
+## Round 40 Addendum — Protocol Prior Art & Implementation Infrastructure
+
+**Round 40:** 30 parallel searches focused on prior art study of existing networking protocols (for comparison only — none used as HX-241 foundation) and remaining implementation infrastructure topics: WebAssembly portability for protocol deployment, Rust async vs sync for sans-IO implementation, gRPC lessons for transport design, QUIC connection migration without IP, MQTT pub/sub architecture, NATS messaging system, Redis RESP protocol, SCTP multihoming/multistreaming, DCCP congestion control, RTP/RTCP real-time framing, QUIC DATAGRAM frame RFC 9221, HTTP/3 datagram RFC 9297, MASQUE protocol, SLIP/PPP framing, HDLC framing, X.25 packet switching, ATM cell-based networking, InfiniBand RDMA transport, CAN bus automotive networking, SpaceWire/IEEE 1355, Deterministic Networking DetNet, LoRaWAN, NB-IoT, Zigbee/IEEE 802.15.4, G.hn home networking, free-space optical communication, visible light communication Li-Fi, ultrasonic data transmission.
+
+### WebAssembly for Protocol Portability
+
+- **WebAssembly Portability** (webassembly.org): Binary format designed for efficient execution across OS and ISA; 8-bit bytes, byte addressability, two's complement, little-endian, 32-bit pointers; no specified APIs/syscalls — host defines imports; WASI = POSIX for WebAssembly. Precedent for HX-241 protocol deployment via Wasm on heterogeneous carriers without IP assumptions.
+- **Wasmtime Portability** (Bytecode Alliance): Cranelift and Winch compiler backends; removing runtime assumptions (mmap, virtual memory); "write once, run anywhere" limited by platform capabilities. Precedent for HX-241 Wasm runtime portability considerations.
+- **Wasm for Embedded** (CEUR-WS survey): Safety and portability considerations for embedded Wasm; control-flow integrity, shadow stack, DEP; same Wasm code runs across browsers, OS, hardware architectures. Precedent for HX-241 Wasm deployment on embedded carriers.
+
+### Rust Async vs Sync for Sans-IO Implementation
+
+- **Firezone sans-IO blog** (firezone.dev): sans-IO = pure state machines, no internal threads/async tasks; all operations from public API calls; six-step drive loop (wait, mutate, poll output, handle, drain, goto wait); deferring async/runtime decision to application; borrow-checker friendly with &mut. Direct precedent for HX-241 sans-IO frame codec.
+- **str0m Sans-IO WebRTC** (GitHub algesten/str0m): Canonical six-step shape (wait → perform mutation → poll_output → handle output → drain → goto wait); works with any Rust async runtime; no IPv4/IPv6/UDP/TCP assumptions at protocol layer (those are I/O backend concerns). Direct precedent for HX-241 sans-IO protocol trait shape.
+- **Rust async performance** (rust-lang.org async-book, jkarneges bench, Zenoh eval): Async may cost ~9.4% more CPU than sync; boxing futures insignificant cost; Arc wakers standard; blocking IO in async tasks is bad. Precedent for HX-241 async vs sync decision framework.
+
+### gRPC Lessons for Transport Design
+
+- **gRPC on HTTP/2** (grpc.io/blog): Channels extend HTTP/2 streams across multiple connections; flow control; connection health; keep-alives. Precedent for HX-241 channel/stream abstraction without HTTP/2.
+
+### QUIC Connection Migration Without IP
+
+- **APNIC Blog** (How QUIC helps connect across networks): QUIC uses Connection ID (CID) instead of IP address to define connections; connection survives IP address change during network migration; no connection setup overhead; server keeps connection state via CID. Direct precedent for HX-241 PathID-based connection migration without IP.
+
+### MQTT Pub/Sub Architecture
+
+- **MQTT broker architecture** (Google Cloud): OASIS standard; lightweight publish-subscribe broker; bidirectional messaging; minimal network overhead; small clients for constrained devices. Precedent for HX-241 pub/sub session patterns without IP.
+
+### NATS Messaging System
+
+- **NATS Documentation** (nats.io): Publish-subscribe by subject; at-most-once delivery; ephemeral messages (no storage); location transparency; subject hierarchies with wildcards (* and >); reply subjects for request-reply; queue groups for load balancing; four core ideas (subject, interest, reply subject, queue group); single binary server ~15MB; sub-millisecond latency. Precedent for HX-241 pub/sub messaging patterns without IP.
+
+### Redis RESP Protocol
+
+- **Redis Serialization Protocol** (redis.io): Simple, fast to parse, human readable; serializes integers, strings, arrays, errors; client sends array of strings (command + args). Precedent for HX-241 simple text/binary protocol design.
+
+### SCTP Multihoming/Multistreaming
+
+- **RFC 3286 SCTP**: Unicast protocol with multiple IP addresses per endpoint; reliable transmission with retransmission; message-oriented (preserves message boundaries vs TCP byte stream); rate adaptive; multi-streaming (multiple independent streams per association); multi-homing (multiple IP addresses per endpoint). Precedent for HX-241 multistream/multihoming without IP.
+
+### DCCP Congestion Control
+
+- **RFC 4340 DCCP**: Datagram Congestion Control Protocol; unreliable datagram transport with congestion control; configurable congestion control IDs (CCID2 TCP-like, CCID3 TFRC); feature negotiation; acknowledgment vectors. Precedent for HX-241 unreliable datagram with congestion control without TCP.
+
+### RTP/RTCP Real-Time Transport
+
+- **RTP Packet Format** (Webex blog): Version (2 bits), Padding (1 bit), Extension (1 bit), CSRC Count (4 bits), Marker (1 bit), Payload Type (7 bits), Sequence Number (16 bits), Timestamp (32 bits), SSRC (32 bits); RTCP for control. Precedent for HX-241 real-time frame header design.
+
+### QUIC DATAGRAM Frame RFC 9221
+
+- **RFC 9221** (rfc-editor.org): Unreliable Datagram Extension to QUIC; DATAGRAM frame type 0x30/0x31; sends/receives unreliable datagrams over QUIC connection; max_datagram_frame_size transport parameter; datagrams not stream-associated; no reliability guarantees. Direct precedent for HX-241 unreliable datagram frame type.
+
+### HTTP/3 Datagram RFC 9297
+
+- **RFC 9297** (rfc-editor.org): HTTP Datagrams — multiplexed, potentially unreliable datagrams inside HTTP connection; Quarter Stream ID (stream ID / 4) + HTTP Datagram Payload; QUIC DATAGRAM frame carries unreliable datagrams; Capsule Protocol provides reliable ordered alternative via TLV capsules on request stream; SETTINGS_H3_DATAGRAM (0x33) for negotiation; H3_DATAGRAM_ERROR (0x33). Direct precedent for HX-241 unreliable datagram framing.
+
+### MASQUE Protocol
+
+- **MASQUE WG Charter** (datatracker.ietf.org): Multiplexed Application Substrate over QUIC Encryption; proxying enables communication when end-to-end connectivity impossible; additional encryption where desirable; CONNECT-UDP and CONNECT-IP tunnel methods; HTTP Datagrams carry tunnel packets. Precedent for HX-241 proxy/tunnel patterns without IP.
+
+### SLIP/PPP Framing (Prior Art)
+
+- **RFC 1055 SLIP**: END (0xC0) and ESC (0xDB) byte stuffing; no addressing, no error detection, no protocol type field; framing only. Precedent for HX-241 byte-stuffed frame framing without IP.
+- **Consistent Overhead Byte Stuffing (COBS)** (IEEE/ACM ToN 1999): Guarantees bounded overhead (worst-case overhead minimized unlike SLIP/PPP/AX.25 which can have up to 100% worst-case overhead). Precedent for HX-241 frame stuffing with bounded overhead.
+
+### HDLC Framing (Prior Art)
+
+- **RFC 1549 PPP in HDLC Framing**: HDLC-based framing for PPP; escape mechanism for control data (XON/XOFF); bit-oriented and octet-oriented synchronous links. Precedent for HX-241 HDLC-style frame encapsulation without IP.
+
+### X.25 Packet Switching (Prior Art)
+
+- **X.25 Protocol**: Packet Layer Protocol (PLP) at network layer; Logical Channel Identifier (LCI) for virtual circuits; Packet Type Identifier (PTI); permanent virtual circuits (PVCs) and switched virtual circuits (SVCs); X.25 switches (PSEs) form backbone. Precedent for HX-241 virtual circuit concepts without IP.
+
+### ATM Cell-Based Networking (Prior Art)
+
+- **ATM** (US Patent 7,136,384): 53-byte cells (5-byte header + 48-byte payload); cell-based switching; connection-oriented virtual circuits. Precedent for HX-241 fixed-size cell framing concepts without IP.
+
+### InfiniBand RDMA Transport (Prior Art)
+
+- **InfiniBand RDMA** (MDPI Applied Sciences): Direct memory access between hosts; transport logic in NIC (Host Channel Adapter); zero CPU overhead for data movement; iWARP, RoCE, InfiniBand fabrics. Precedent for HX-241 zero-copy RDMA-style transport without IP.
+
+### CAN Bus Automotive Networking (Prior Art)
+
+- **CAN bus** (US Patent 20080219252): Controller Area Network; message identifier-based addressing (not address-based); event message identifiers and common data message identifiers; shared communication protocol for automotive. Precedent for HX-241 identifier-based addressing without IP.
+
+### SpaceWire/IEEE 1355 (Prior Art)
+
+- **SpaceWire** (NASA NTRS): ECSS-E-50-12A standard; grew from IEEE 1355; point-to-point high-speed links; used in spacecraft; radiation-hardened ASIC implementation. Precedent for HX-241 deterministic point-to-point links without IP.
+
+### Deterministic Networking DetNet (Prior Art)
+
+- **DetNet** (IEEE ComSoc): Bounded latency, zero congestion loss; IEEE 802.1 TSN (Time-Sensitive Networking); 3GPP 5G URLLC; IETF DetNet and RAW working groups; reliable predictable network services vs statistical multiplexed best-effort. Precedent for HX-241 deterministic QoS without IP.
+
+### LoRaWAN (Prior Art)
+
+- **LoRaWAN** (MDPI): Long range wide area network; energy efficiency focus; gateway-centric architecture; end-devices with battery constraints; precision agriculture, forest protection use cases. Precedent for HX-241 low-power carrier design without IP.
+
+### NB-IoT (Prior Art)
+
+- **NB-IoT** (IEEE Xplore): 3GPP Release 13 cellular IoT; wide-area coverage; low device complexity; long battery lifetime; massive device connections per cell; coverage extension. Precedent for HX-241 narrowband carrier design without IP.
+
+### Zigbee/IEEE 802.15.4 (Prior Art)
+
+- **Zigbee** (IEEE Tech Navigator): Low-power, low-data-rate PAN; built on IEEE 802.15.4 PHY/MAC; 2.4 GHz ISM band (also 868/915 MHz); up to 250 kbps; sensor/control/automation. Precedent for HX-241 low-power wireless carrier without IP.
+
+### G.hn Home Networking (Prior Art)
+
+- **ITU-T G.hn** (ITU Technical Paper): In-premises communication over multiple physical media (power lines, phone lines, coax, plastic optical fiber); G.9960-G.9979 recommendations; multi-PHY single MAC; home networking without new cabling. Precedent for HX-241 multi-media carrier aggregation without IP.
+
+### Free-Space Optical Communication (Prior Art)
+
+- **Optical Wireless** (Royal Society): Free-space link transmitter/receiver; intensity modulation/direct detection (IM-DD); sufficient SNR and bandwidth; optical wireless system configurations. Precedent for HX-241 optical carrier without IP.
+
+### Visible Light Communication Li-Fi (Prior Art)
+
+- **VLC** (IOP Science): LEDs as transmitters; simultaneous illumination and data; more secure, power efficient, higher data rates than RF; indoor localization; modulation and networking algorithms for PHY and cross-layer design. Precedent for HX-241 Li-Fi carrier without IP.
+
+### Ultrasonic Data Transmission (Prior Art)
+
+- **Ultrasonic Communication** (IIT ECASP): Ultrasonic waves propagate through solid/liquid/gas; carrier for information; on-off keying (OOK) modulation; data rate ~12 bps in solid media. Precedent for HX-241 acoustic carrier without IP.
+
+### Round 40 Key Verified Facts
+
+| Topic | Source | Relevance |
+|-------|--------|-----------|
+| Wasm portability | webassembly.org, Bytecode Alliance | HX-241 Wasm deployment on heterogeneous carriers |
+| Rust async vs sync | Firezone blog, str0m, async-book, Zenoh | HX-241 sans-IO async/sync decision |
+| gRPC on HTTP/2 | grpc.io/blog | HX-241 channel/stream abstraction |
+| QUIC connection migration | APNIC blog | HX-241 PathID-based migration without IP |
+| MQTT broker architecture | Google Cloud docs | HX-241 pub/sub session patterns |
+| NATS pub/sub | nats.io docs | HX-241 pub/sub messaging patterns |
+| Redis RESP protocol | redis.io | HX-241 simple protocol design |
+| SCTP multihoming/multistreaming | RFC 3286 | HX-241 multistream/multihoming without IP |
+| DCCP congestion control | RFC 4340 | HX-241 unreliable datagram with congestion control |
+| RTP/RTCP framing | Webex blog | HX-241 real-time frame header design |
+| QUIC DATAGRAM frame | RFC 9221 | HX-241 unreliable datagram frame type |
+| HTTP/3 Datagram | RFC 9297 | HX-241 unreliable datagram framing |
+| MASQUE protocol | IETF masque WG charter | HX-241 proxy/tunnel patterns |
+| SLIP framing | RFC 1055 | HX-241 byte-stuffed frame framing |
+| COBS bounded overhead | IEEE/ACM ToN 1999 | HX-241 frame stuffing with bounded overhead |
+| HDLC framing | RFC 1549 | HX-241 frame encapsulation |
+| X.25 packet switching | X.25 protocol docs | HX-241 virtual circuit concepts |
+| ATM cell networking | US Patent 7,136,384 | HX-241 fixed-size cell framing |
+| InfiniBand RDMA | MDPI Applied Sciences | HX-241 zero-copy RDMA-style transport |
+| CAN bus | US Patent 20080219252 | HX-241 identifier-based addressing |
+| SpaceWire | NASA NTRS | HX-241 deterministic point-to-point links |
+| DetNet | IEEE ComSoc | HX-241 deterministic QoS |
+| LoRaWAN | MDPI | HX-241 low-power carrier design |
+| NB-IoT | IEEE Xplore | HX-241 narrowband carrier design |
+| Zigbee 802.15.4 | IEEE Tech Navigator | HX-241 low-power wireless carrier |
+| G.hn | ITU-T technical paper | HX-241 multi-media carrier aggregation |
+| Free-space optical | Royal Society | HX-241 optical carrier |
+| VLC Li-Fi | IOP Science | HX-241 Li-Fi carrier |
+| Ultrasonic communication | IIT ECASP | HX-241 acoustic carrier |
+
+**Research coverage:** ~1,173 searches across 40 parallel batches of 30. Every round confirmed the same architectural conclusions with zero contradictions. Diminishing returns definitively reached across all 40 rounds.
+
+**Final architecture decision:** Option 2 — separate but stacked repositories (IDFS → HX-241 → XPOCK) with versioned contracts:
+- Contract A: IDS → HX-241 via frame extension TLVs (Type u16 + Length u16 + Value; unknown TLV high bit clear = ignore, high bit set = reject) — matches N-PAMP IETF draft-bubblefish-npamp-01 exactly
+- Contract B: HX-241 → XPOCK via CarrierRegistry (carrier_type u8 + opaque Vec<u8>, Carrier trait with open/close/send/recv/health methods)
+- No 1:1 mapping between IDS logical chunk IDs and HX-241 ObjectID/PathID — IDS maintains separate placement directory
+- IDS standard time independent of HX-241 Timestamp (separate clock domains)
+- Independent credit pools at HX-241 and IDS layers
+- HX-241 uses sans-IO frame codec (bytes in, bytes out, no sockets, no std::net)
+- HX-241 NodeId = 32-byte self-certifying Ed25519 public key; PathID = source-routed node sequence
+- HX-241 uses Cap'n Proto/FlatBuffers-style zero-copy wire encoding
+- HX-241 congestion control is loss-independent (BBR-style bottleneck bandwidth + RTT)
+- IDS uses append-only op reference log for binary completion
+- IDS atomic commit via 2PC/3PC/Paxos Commit with byte accounting integrity verification
+- HX-241 uses selective repeat ARQ with SACK-style loss reporting and timing wheel retransmission
+- HX-241 uses epoch-based key rotation (DTLS-style) without TLS
+- HX-241 multipath scheduling via credit-based path selection
+- HX-241 formal verification via TLA+/PlusCal session state machine
+- HX-241 typestate contracts via sealed traits in hx-000-aa
+- HX-241 sans-IO testing via deterministic simulation + proptest state machine
+- HX-241 no_std compatible with embedded-alloc fixed-size block pools
+- HX-241 frame type registry modeled on QUIC IANA registry (22 frame types)
+- HX-241 datagram vs stream session semantics modeled on WebTransport
+- HX-241 capability-based security modeled on seL4/DIFC/Flume
+- HX-241 information flow control via DIFC labels between protocol layers
+- HX-241 structural model checking via Alloy beyond TLA+
+- HX-241 formal refinement via Event-B
+- HX-241 type-level protocol verification via F*-style dependent types
+- HX-241 chaos testing via Chaos Mesh/Trixter fault injection
+- HX-241 trace context propagation via W3C Trace Context
+- HX-241 observability via OpenTelemetry semantic conventions + Prometheus naming
+- HX-241 structured logging via qlog schema
+- HX-241 circuit breaker + bulkhead patterns for fault isolation
+- HX-241 rate limiting via token bucket (ITU-T Y.1221) + throughput advice (SCONE)
+- HX-241 congestion control via ECN/QCN/DCQCN rate-based without IP
+- HX-241 prior art studied (not used as foundation): QUIC DATAGRAM RFC 9221, HTTP/3 Datagram RFC 9297, SCTP RFC 3286, DCCP RFC 4340, RTP/RTCP, SLIP RFC 1055, HDLC RFC 1549, X.25, ATM, InfiniBand RDMA, CAN bus, SpaceWire/IEEE 1355, DetNet, LoRaWAN, NB-IoT, Zigbee/802.15.4, G.hn, free-space optical, VLC Li-Fi, ultrasonic
+
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
