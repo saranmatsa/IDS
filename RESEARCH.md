@@ -485,10 +485,70 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 - **Fog computing** (NIST SP 500-325): layered model between end-devices and centralized cloud; fog nodes organized vertically (isolation), horizontally (federation), or by latency-distance to devices; minimizes request-response time.
 - **CDN reference architecture** (Cloudflare): cache content close to end users at edge data centers; decrease latency, increase performance, availability, redundancy, security.
 
+## Round 21 — Deep Architecture Patterns (~30 more searches, ~630 cumulative)
+
+**P2P file sharing & swarm download:**
+- **BitTorrent protocol** (Cohen 2003, bittorrentecon.pdf): tit-for-tat incentive scheme, strict priority piece selection, rarest first policy, random first piece, endgame mode. File split into fixed-size pieces (typically 256KB), sub-pieces of 16KB pipelined (typically 5 outstanding). Rarest first maximizes piece entropy and reduces risk of piece extinction when seed leaves. Tit-for-tat chokes/unchokes peers based on reciprocation; optimistic unchoking helps newcomers. Directly relevant to IDFS swarm-based chunk distribution.
+- **BitTorrent dissection** (Felber et al., PAM-04): peer set of 20-40 peers, tracker provides ~50 peers at join. Peers maintain connections to 4 best downloaders/uploaders. Choke/unchoke policy enforces reciprocation. Rarest first keeps chunk entropy high across swarm.
+- **BitTorrent piece algorithms** (multiple academic sources): piece revelation vulnerable to under-reporting (game-theoretic analysis); distributed credit method to prevent selfish gaming; unified utility-based selection strategy.
+
+**Distributed file systems:**
+- **Google File System** (GFS): single master + multiple chunkservers + clients. Fixed-size 64MB chunks with globally unique 64-bit chunk handles. Chunks replicated 3x by default. Master holds all metadata (namespace, ACL, file-to-chunk, chunk-to-server). Heartbeat between master and chunkservers. Client library linked into application. Clients read directly from chunkservers; master only involved in metadata operations. Direct precedent for IDFS architecture.
+- **Ceph** (RADOS, CRUSH, librados): Monitors (cluster map), OSDs (object storage), Manager, MDS (metadata for CephFS). Clients compute object location via CRUSH — no central lookup bottleneck. CRUSH map hierarchy (host→rack→row→datacenter) with placement rules. Placement groups (PGs) aggregate objects. Primary OSD replicates to secondary OSDs (subops). RADOS objects stored as flat namespace objects with metadata. librados native client interface. CephFS, RBD, RGW layered on RADOS. Direct precedent for IDFS placement directory + replication.
+- **HDFS** (Hadoop): NameNode + DataNodes + clients. Rack-aware replica placement (one local, one same-rack different node, one remote rack for RF=3). Rack ID determined via topology script. Block-level replication. Client reads directly from DataNodes. NameNode single point of metadata (mitigated by HA NameNode in Hadoop 2+).
+- **Lustre** (MDS/MDT + OSS/OST + MGS): Metadata and data completely separated. MDS manages namespace (filenames, directories, permissions, file layout) — not involved in file I/O after open. OSS stores bulk data objects on OSTs. Files striped across multiple OSTs (RAID-0 style). File Level Redundancy (FLR) for mirroring. LNet networking. 50K+ clients, 10TB/s aggregate. Complete metadata/data separation directly relevant to IDFS design.
+
+**Content addressing & Merkle structures:**
+- **IPFS** (docs.ipfs.tech): Content Identifier (CID) = hash of data + codec. Content-addressed, not location-addressed. IPLD (InterPlanetary Linked Data) for Merkle DAG representation. CIDs enable verification by recomputing hash. UnixFS, iroh collections, MASL built on IPLD. Validates IDFS content-addressed storage model.
+- **Merkle DAG** (multiple sources): directed acyclic graph with content hashing at each node. O(log n) verification via authentication paths. Consistency proofs for append-only logs. SPV (simplified payment verification) in Bitcoin. Tamper detection and branch-by-branch verification.
+
+**Storage engines:**
+- **LSM trees** (CockroachDB/Pebble): hierarchical tree of immutable SST files (sorted string tables). Leveled vs tiered compaction. SST compression (MinLZ1 default). Write-ahead log (WAL) for durability. MemTable → SST flush → compaction. Directly relevant to IDFS metadata storage engine.
+- **Chain replication** (Renesse et al., USENIX OSDI 2004): high throughput, fault-tolerant storage. Chain of servers: head receives writes, tail serves reads. Outperforms primary/backup in most scenarios. Linearizable. Directly relevant to IDFS replication protocol choice.
+
+**Replication & consensus:**
+- **EPaxos** (Egalitarian Paxos): leaderless, 2F+1 replicas tolerates F failures. Fast path in single round-trip for non-conflicting commands. Geo-replication optimized.
+- **Mencius** (Mao et al., OSDI 2008): multi-leader replicated state machine. Efficient for WAN deployment.
+- **Byzantine fault tolerance** (ACM Computing Surveys): PBFT O(n²) messages, Zyzzyva O(n), SBFT O(n), HotStuff/LibraBFT O(n), DAG-Rider/Narwhal O(n³ log n), Aardvark O(n²), Pompe O(n)+X, Spin O(n²). Time complexity 4-8 rounds. PBFT pioneered practical BFT in async networks.
+
+**Cryptography for distributed systems:**
+- **Threshold signatures** (ACM CSUR): Boldyreva threshold BLS, (t,n) threshold tolerates t<n/2 malicious parties. DKG (distributed key generation) without trusted dealer. Proactive security possible. Non-interactive signature generation.
+- **Zero-knowledge proofs**: zk-SNARKs (succinct, constant-size proofs ~192-400 bytes, trusted setup, pairing-based), zk-STARKs (transparent, no trusted setup, post-quantum, larger proofs tens-hundreds KB), Bulletproofs (no trusted setup, logarithmic proof size, linear verification). Groth16, PLONK representative schemes.
+- **Homomorphic encryption & MPC**: MKFHE (multi-key FHE) without trusted setup based on RLWE. BGV, BFV, CKKS, TFHE schemes. Secure multi-party computation via garbled circuits, secret sharing.
+
+**Privacy & oblivious access:**
+- **Oblivious RAM** (Path ORAM, MIT 6.5610): hides access patterns from untrusted server. Tree-based ORAM (Shi et al.) → Path ORAM (Stefanov et al.) O(log N) bandwidth. Client has small private state (stash + position map). Data encrypted. Used by Signal for private contact discovery. ORAM vs PIR: ORAM supports reads+writes with polylog overhead; PIR supports only reads with linear server work.
+- **Private information retrieval**: single-server PIR requires public-key crypto; multi-server PIR more efficient. Path-PIR hybrid combines ORAM+PIR.
+
+**Hardware trust:**
+- **TEE attestation** (Springer): Intel SGX, Arm TrustZone-A/-M, AMD SEV, RISC-V TEEs. Local attestation (same system) and remote attestation (different systems). Remote attestation proves TEE identity to verifier.
+- **NIST PQC standards** (IEEE Xplore): NIST PQC standardization (2016-2024), 82 candidates, 5 selected. Kyber (KEM), Dilithium (signature), SPHINCS+ (signature), Falcon (signature), plus 4th round candidates. Quantum computers break RSA, DH, ECC.
+
+**Security attacks:**
+- **Side-channel attacks** (ACM CSUR): timing, power, EM, cache, speculative execution (Spectre/Meltdown), RowHammer. Defense taxonomy: masking, hiding, constant-time, blinding, redundancy, dual-rail, error detection.
+- **Chaos engineering** (ACM CSUR MLR): complement to conventional testing. Fault injection unit with safety controller. Game days, chaos monkey, chaos engineering principles for distributed systems.
+
+**Formal verification & testing:**
+- **TLA+ tools** (lamport.org): TLC model checker (explicit-state, safety+liveness, ~linear speedup on 32+ cores), Apalache (symbolic, SMT/Z3, bounded executions + inductive invariants), PlusCal translator (algorithm language that compiles to TLA+).
+- **Verification of distributed systems** (ACM Queue): Yuan et al. 2014 study — failures difficult to produce offline is false. QuickCheck property-based testing generates random input, returns counterexample on failure. Model checking for state space exploration.
+- **Fuzzing** (chs.us): libFuzzer-style harness entry point `LLVMFuzzerTestOneInput`. cargo-fuzz/cargo-libafl for Rust. Coverage-guided fuzzing finds real bugs in CI.
+- **Conformance testing** (ETSI): determines extent to which implementation conforms to standard requirements. SUT/IUT boundaries, test scripts, dedicated test system with full control and observation.
+
+**Operations & observability:**
+- **OpenTelemetry**: open standard for telemetry, single set of APIs/libraries/agents/collector. Distributed traces + metrics. Builds on OpenTracing + OpenCensus. Vendor-neutral instrumentation.
+- **SRE** (Google SRE workbook): SLOs set target reliability level. Error budgets — above threshold users happy, below threshold users complain. SLO compliance as decision-making tool, not just KPI.
+- **API design**: REST (resource-oriented, stateless, cacheable via Cache-Control/ETag, RFC 9111), GraphQL (strongly typed schema, single endpoint, client-defined response shape, avoids over/under-fetching), gRPC (HTTP/2, Protobuf, streaming), WebSocket (full-duplex).
+- **IAM standards** (CSA): authentication (OIDC, SAML, passkeys), authorization (OAuth 2.0 delegated authorization). Federated token-based authentication. Identity providers issue tokens asserting identity.
+- **Certificate management** (HashiCorp Vault): ACME protocol (RFC 8555) for automated certificate issuance. HTTP-01, DNS-01, TLS-ALPN-01 challenge types. PKI plugin for Vault.
+- **TLS/QUIC** (RFC 9001): QUIC packet protection uses TLS 1.3. Clients must not offer TLS <1.3. Key phase timing signals. Key updates before receipt to avoid timing leaks.
+- **Cryptography fundamentals** (BSI TR-02102, OWASP): symmetric (AES), asymmetric (RSA/ECC), hashing (SHA-256/3), HMAC, digital signatures, KDF (HKDF, Two-Step KDF). MD5/SHA-1 broken. ECB mode leaks patterns. Use argon2id/scrypt/bcrypt for passwords (not fast hashes).
+- **Post-quantum migration** (OWASP cheat sheet): inventory crypto dependencies, prioritize, adopt supported implementations, test, roll out. Start preparation even when migration not yet possible.
+- **Random number generation** (Rust Rand Book): CSPRNG = cryptographically secure PRNG with large state, no efficient prediction algorithm. RngCore trait. rand::rng() for non-deterministic source.
+
 ---
 
 ## Research Completion Statement
 
-**~600 searches across 20 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 20 rounds of 30 searches each (~600 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~630 searches across 21 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 21 rounds of 30 searches each (~630 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
