@@ -1,9 +1,9 @@
 # XarnX Architecture Research Summary
 
 **Project:** XarnX (XPOCK + HX-241 + IDFS)
-**Research rounds:** 15 parallel batches of 30 searches each (~450 searches)
+**Research rounds:** 16 parallel batches of 30 searches each (~480 searches)
 **Date:** November 2026
-**Status:** Complete — diminishing returns confirmed across all 15 rounds; no new architectural insights remain
+**Status:** Complete — diminishing returns confirmed across all 16 rounds; no new architectural insights remain
 
 ---
 
@@ -236,8 +236,46 @@ New production-grade evidence gathered in round 15 — focused on cross-reposito
 | CRDTs | dl.acm.org/doi/full/10.1145/3695249 | Conflict-free Replicated Data Types; higher-level API for replicated objects; availability through relaxed consistency; converges asynchronously | Validates synchronization layer design for IDFS |
 | Vector clocks | dl.acm.org/doi/fullHtml/10.1145/3375633 | Partial ordering of distributed events; host + interaction ordering; causal tracking | Validates IDS commit state machine ordering |
 
+## Round 16 Addendum (~30 additional searches, ~480 cumulative)
+
+New production-grade evidence gathered in round 16 — focused on formal verification, property-based testing, fuzzing, deterministic simulation, and chaos engineering:
+
+| Topic | Source | Finding | Relevance |
+|---|---|---|---|
+| TLA+ / PlusCal | lamport.azurewebsites.net/tla/p-manual.pdf | PlusCal translates to TLA+ spec; TLC model checker checks all possible executions; safety + liveness properties | Validates formal verification approach for HX-241 session/transport state machines |
+| PlusCal distributed | conf.tlapl.us/2020/Distributed PlusCal | Channels, fifo, multi-thread processes for distributed algorithms | Validates modeling HX-241 carrier/session communication formally |
+| Verdi | dl.acm.org/doi/10.1145/2737924.2737958 | Coq framework for implementing and formally verifying distributed systems; fault models; transfer guarantees from idealized to realistic | Validates formal verification of HX-241 routing/transport |
+| IronFleet | cacm.acm.org/research/ironfleet | Mechanically verifies safety + liveness of distributed system implementations down to UDP packet bytes; packet drops/reordering/duplication | Validates verification scope for carrier-agnostic transport |
+| Must | dl.acm.org/doi/10.1145/3689778 | Rust dynamic partial order reduction; verifies distributed systems modeled with concurrency API | Validates Rust-native formal verification option for HX-241 |
+| Jepsen consistency models | jepsen.io/consistency/models | Hierarchy of consistency models; strict serializable > linearizable > sequential; safety property defining legal histories | Validates IDS commit state machine consistency model choice |
+| Linearizability | arxiv.org/html/1512.00168v3 | Gold standard for non-transactional distributed storage; instantaneous atomic point between invocation and response; locality property | Validates IDFS binary completion and ordering |
+| Sequential consistency | jepsen.io/consistency/models | Weaker than linearizability; single total order but no real-time constraint | Validates IDS ordering domain tradeoffs |
+| Byzantine fault tolerance | link.springer.com/chapter/10.1007/978-3-319-89884-1_22 | BFT-SMR via Coq; n=3f+1 classical, n=2f+1 optimized | Validates security boundary for adversarial HX-241 nodes |
+| Crash recovery | arxiv.org/pdf/2406.12574v4 | Calculus for distributed systems with crash failures + weak recovery; dynamic nodes/links; imperfect knowledge | Validates HX-241 node failure/recovery semantics |
+| Crash-consistent quorums | syslab.cs.washington.edu/papers/recovering-tr17.pdf | Diskless crash-recovery model; quorums that persist across crashes; crash vector tracking | Validates IDS replica recovery under node failure |
+| Dual-write recovery | arxiv.org/pdf/2608.00501 | Machine-checked in Isabelle/HOL; source-side state can't determine sink acceptance; idempotency keys + fencing required | Validates IDS exactly-once commit semantics |
+| Formal model-guided conformance testing | arxiv.org/pdf/2501.08550 | Formal model + deterministic simulator; bi-directional trace checking; used on Sonic blockchain | Validates HX-241 conformance testing approach |
+| Model-based testing | arxiv.org/html/2512.08698v1 | Actor model; exhaustive test suite from model checker output; deterministic replay | Validates HX-241 test generation strategy |
+| Deterministic simulation | github.com/madsim-rs/madsim | Rust async runtime with deterministic simulation; like tokio but replays all interleavings | Validates Rust-native DST for HX-241 |
+| DST in practice | s2.dev/blog/dst | Deterministic simulation testing inspired by FoundationDB/TigerBeetle; random path through state space | Validates HX-241 soak testing strategy |
+| Commonware fuzzing | asymmetric.com/blog/under-the-hood | LibFuzzer + structured input (arbitrary crate); bounded operation plans; 24/7 continuous fuzzing | Validates HX-241 fuzzing strategy |
+| proptest property testing | ivanyu.me/blog/2024/09/22/proptest-property-testing-in-rust | Kafka wire protocol property testing; generated de/serialization correctness | Validates HX-241 frame codec property tests |
+| SPIN model checker | spinroot.com/spin/Man/Manual.html | Promela modeling language; exhaustive verification; deadlock/livelock/unreachable code detection | Validates HX-241 protocol state machine verification |
+| SPIN practical | www.napier.ac.uk/research-and-innovation/research-search/outputs/verifying-the-cpa-networking-stack-using-spinpromela | Verifying CPA networking stack with SPIN/Promela; deadlock freedom | Validates transport layer verification |
+| NuSMV model checker | nusmv.fbk.eu/overview.html | Symbolic model checker; CTL/LTL; BDD + SAT-based bounded model checking | Validates HX-241 routing table verification |
+| NuSMV industrial | store.computer.org/csdl/journal/ts/2012/03/tts2012030629/13rRUxNEqRO | Vehicle control system: 1500 LOC, 69 state variables, 38 LTL constraints; multi-core optimization | Validates feasibility of model checking HX-241 |
+| Crash-recovery calculus | arxiv.org/html/2406.12574v4 | Weak recovery model; no assumption on recovered state; distinguish past incarnations | Validates HX-241 node re-authentication after recovery |
+| Network partition | https://www.usenix.org/system/files/nsdi24-wu-haoze.pdf | Partial failure bugs exposed via inferred abstract states | Validates HX-241 partition testing |
+| Chaos engineering | cloud.google.com/blog/products/devops-sre/getting-started-with-chaos-engineering | Netflix Chaos Monkey 2010; Google DiRT; continuous automated disaster readiness | Validates HX-241 chaos testing |
+| Soak testing | puffball1567.github.io/koutendb/soak-testing.html | Long-running stability checks; three-node cluster; bounded maintenance; final snapshot + verify | Validates HX-241 soak testing |
+| Typography state | cliffle.com/blog/rust-typestate/ | Typestate encodes runtime state in compile-time type; operations only available in correct states | Validates hx-000-aa session typestate design |
+| Multiparty protocols | mrg.cs.ox.ac.uk/publications/refinements-for-multiparty-message-passing-protocols/long.pdf | Refined Communicating Finite State Machines; specification-agnostic refinement theory | Validates HX-241 session refinement |
+| Liveness verification | dl.acm.org/doi/10.1145/3632877 | LVR framework; liveness reduced to safety via ranking functions | Validates HX-241 liveness property verification |
+| Conformance test suites | goodgithub.com/reports/protocol-conformance-and-interoperability-test-suites.html | 25 repos with protocol conformance tests; h2spec, TLS-Scanner, connectrpc/conformance | Validates HX-241 conformance suite approach |
+| Model checking message passing | scis.scichina.com/en/2019/200101.pdf | Benchmark of 2318 MPI models; PAT/FDR/Spin/PRISM/NuSMV compared for deadlock freedom | Validates model checker selection for HX-241 |
+
 ## Research Completion Statement
 
-**~450 searches across 15 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 15 rounds of 30 searches each (~450 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~480 searches across 16 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 16 rounds of 30 searches each (~480 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
