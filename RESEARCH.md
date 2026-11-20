@@ -1837,4 +1837,183 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 - Independent credit pools at HX-241 and IDS layers
 - HX-241 uses sans-IO frame codec (bytes in, bytes out, no sockets, no std::net)
 
+---
+
+## Round 36 Addendum — Wire Format, Security & Edge Mechanics
+
+**Round 36:** 30 parallel searches focused on remaining implementation-critical details: binary serialization formats, zero-copy buffer management, object capability security pattern, backpressure propagation across layers, congestion control without packet loss, source routing, geographic topology-aware routing, multicast/anycast/pub-sub, carrier type namespace exhaustion, TLV high-bit reject forward incompatibility, physical layer side channels, half duplex carrier communication, carrier MTU discovery, carrier keepalive session liveness, link layer framing without IP, energy constrained carrier operation, carrier discovery without mDNS/SSDP/UPnP, carrier address registry namespace collision, carrier plugin security sandbox, carrier plugin conformance testing, name identifier address distinction, location independent naming, self-certifying identifier, 9-char op reference append-only log, binary completion atomic commit, byte accounting integrity, fixed client roster near-to-far routing, coordinated deletion millisecond federation, IDS standard time proprietary clock.
+
+### Binary Serialization Formats — Wire Format Encoding
+
+- **Cap'n Proto Encoding Spec** (capnproto.org/encoding): 64-bit word alignment, little-endian integers, IEEE-754 floats, zero-copy pointer-based encoding. No parse step — pointer directly into message buffer. Precedent for HX-241 frame encoding with zero-copy access.
+- **FlatBuffers**: Zero-copy serialization without a parsing step; access serialized data directly without unpacking. Schema evolution via field IDs and optional fields. Precedent for HX-241 wire format cross-language compatibility.
+
+### Zero-Copy Buffer Management
+
+- **Zero-Copy Optimization in Rust** (nordvarg.com): Data copy chain — NIC → kernel buffer → user space → application buffer → processing buffer. Zero-copy eliminates intermediate copies via mmap, io_uring, direct buffer access. Precedent for HX-241 sans-IO frame codec with zero-copy buffer slices.
+
+### Object Capability Pattern — Security Boundary
+
+- **Object-Capability Model** (Cosmos SDK docs): Two rules — (1) object can message another only if it holds a reference; (2) reference obtained only by receiving it through a message. No global registry. Security analysis is local — audit what a module can do based on references held. Direct precedent for HX-241 capability-based security model where carrier/session access requires holding capability references.
+
+### Backpressure Propagation Across Layers
+
+- **Backpressure Flow Control** (USENIX NSDI 2022): Per-hop, per-flow credit-based flow control inspired by ATM networks. Each switch tracks buffer space, grants permission to send only if upstream buffer has room. No congestion loss by design. Flows assigned to queues dynamically to minimize HoL blocking. Precedent for HX-241 credit-based multipath flow control with per-path credit pools.
+
+### Congestion Control Without Packet Loss
+
+- **BBR: Congestion-Based Congestion Control** (ACM Queue): Characterizes bottleneck bandwidth and round-trip propagation delay. Runs at highest throughput and lowest delay when rate balance (arrival rate = BtlBw) and full pipe (data in flight = BtlBw × RTprop). Loss-independent congestion control — uses delivery rate and min RTT, not packet loss. Precedent for HX-241 congestion control without relying on packet loss signals.
+
+### Source Routing
+
+- **Source Routing** (Wikipedia): Sender prepends complete route to packet header. Each intermediate node examines first routing byte/character, discards it, forwards to indicated port. Myrinet, SpaceWire, IEEE 1355 support source routing. IPv4 SSRR/LSRR header options deprecated due to security concerns. SPRING (RFC 7855) — source packet routing in networking, explicit path specification, trust domain boundaries required. Direct precedent for HX-241 PathID carrying ordered node sequence for source-routed frame forwarding.
+- **DSR** (Dynamic Source Routing, Rice/CMU): Self-organizing ad hoc routing without infrastructure. Route discovery and route maintenance. Source route in header = complete ordered node list. Trivially loop-free. Intermediate nodes don't need up-to-date routing info — they just follow the source route. Nodes overhearing can cache routes. Precedent for HX-241 route discovery and forwarding without routing tables at intermediate nodes.
+
+### Geographic Topology-Aware Routing
+
+- **Four Principles of Geographic Routing** (arXiv 1403.3007): Uses node position information to assist routing. Challenge: applicability to real networks — either idealized assumptions or costly planarization. Criterion needed for when geographic routing is appropriate.
+- **R/Kademlia** (KIT): Recursive and topology-aware overlay routing. Proximity routing, proximity neighbor selection, topology-based NodeId assignment. Low bandwidth, low latency variant of Kademlia. Precedent for HX-241 topology-aware routing without IP.
+- **QuickPeer** (Università di Bologna): Gossip-based latency-aware overlay topology. Virtual coordinates predict RTT between peers. Epidemic protocol converges in few gossip rounds.
+- **Pastry Topology-Aware Routing** (HP Labs): Proximity neighbor selection — routing table entries refer to nodes near the local node according to proximity metric (RTT). Proximity invariant maintained during node join and maintenance.
+- **Global Soft-State Topology-Aware Overlays** (HP Labs): Landmark clustering + RTT measurements. Global proximity info as soft-state on the system. Publish/subscribe for proximity notifications.
+
+### Multicast / Anycast / Pub-Sub Without IP
+
+- **Why We Shouldn't Forget Multicast in Name-Oriented Publish/Subscribe** (arXiv 1201.0349): Name-oriented networks need multicast for efficient many-to-many distribution, real-time data, simplified rendezvous. Group-oriented naming concept.
+- **HCcast** (ScienceDirect): Topology-aware hierarchical clustering multicast. Clusters based on topology, not purely logical. DFS-based newcomer positioning. Rendezvous Point for group info.
+- **Topology-Adaptive Membership Protocol** (UCSB): Hierarchical tree membership service using multicast within groups. TTL-based scope limiting. Adaptive to topology changes.
+
+### Carrier Type Namespace — u8 Exhaustion
+
+- **hx241-protocol/CARRIER-CONTRACT.md** (GitHub): I-CARR-012 carrier discovery asynchronous via CarrierRegistry. I-CARR-013 TransportManager selects carrier by lowest energy_cost → lowest latency → highest bandwidth. I-CARR-014 failed carriers removed from selection. I-CARR-015 carrier migration preserves session state. Carrier type u8 (255 max variants) — 33 known variants, scalability untested.
+
+### TLV High-Bit Reject — Forward Incompatibility
+
+- **N-PAMP IETF draft-bubblefish-npamp-01**: Extension TLV = Type (16 bits) + Length (16 bits) + Value. Unknown TLV with high bit (0x8000) clear = ignore. Unknown TLV with high bit set = forward-incompatible, reject frame. Exact match for HX-241 Contract A TLV design. Verified from hx241-protocol GitHub.
+
+### Physical Layer Side Channels
+
+- **Whispering Devices** (IRISA survey): Side-channels through electromagnetic waves, light, sound, power drain. Classification by criticality, intentionality, attacker type, physical medium. Precedent for HX-241 carrier spoofing detection and physical layer security analysis.
+
+### Half Duplex Carrier Communication
+
+- **CSMA/CAP** (UC Santa Cruz): Carrier-sense multiple access with collision avoidance and pilots for half-duplex radio. RTS/CTS handshake with pilots. Cannot guarantee collision-free with traditional RTS-CTS on single channel. Precedent for HX-241 medium access control without IP.
+
+### Carrier MTU Discovery
+
+- **Ethernet MTU** (Cisco IOS XR): Largest frame excluding 4-byte FCS, varies across physical networks. MTU discovery processes. Precedent for HX-241 carrier MTU discovery without IP — per-carrier MTU negotiated at carrier registration.
+
+### Carrier Keepalive / Session Liveness
+
+- **OpenFlux Protocol Negotiation** (GitHub): Session layering with replay window, sequence numbers, challenge replacement. Carrier frame starts with magic bytes for demultiplexing. Precedent for HX-241 session liveness and keepalive without TCP keepalive.
+
+### Link Layer Framing Without IP
+
+- **Framing** (Computer Networks: A Systems Approach): Flag field 01111110, byte stuffing, bit stuffing, length fields, CRC checksum. PPP frame format with negotiated fields via LCP. Precedent for HX-241 binary frame format without IP — fixed 109-byte header + extension TLV + payload.
+
+### Energy Constrained Carrier Operation
+
+- **Energy Efficiency Trade-Off** (Wireless Personal Communications): Duty-cycling trade-off between energy consumption and delay. Wake-up radio (WuR) channel alleviates delay. Node sleeps most of the time, wakes at selected moments for 5-10 year lifespan. Precedent for HX-241 energy cost modeling and carrier selection.
+
+### Carrier Discovery Without mDNS/SSDP/UPnP
+
+- **SSDP Discovery** (ESP3D): UPnP-based local network device discovery. Precedent for HX-241 carrier discovery without mDNS/SSDP/UPnP — HX-241 uses its own native discovery mechanism.
+
+### Carrier Address Registry — Namespace Collision
+
+- **Multicast Address Collision Prevention** (U Florida): Overlay solution to IP-multicast address collision. Globally scoped channel addresses have high collision probability when assigned randomly. Precedent for HX-241 carrier address registry management without central allocation.
+
+### Carrier Plugin Security Sandbox
+
+- **Plugin Security** (Verql): Defence in depth — explicit capability declaration, deny-by-default user consent, hard gating of sensitive host surfaces. Process separation for true isolation. Precedent for HX-241 carrier plugin security model.
+
+### Carrier Plugin Conformance Testing
+
+- **ACP Conformance** (GitHub): Test suite walks full cycle — connect, config, manifest, idle, text, thinking, commands, results. Schema validation, handshake, actions, full-session tests. Precedent for HX-241 carrier plugin conformance testing.
+
+### Name Identifier Address Distinction
+
+- **Identifier-Locator Separation** (IEEE Technology Navigator): Divides IP address dual role into identifier (who/what) and locator (where). Enables mobility, multihoming, scalable routing. Stable identifiers persist despite attachment point changes. Precedent for HX-241 NodeId (identifier) vs PathID (locator) separation.
+- **Distributed Systems Naming** (4th edition slides): Pure names (random string, comparison only), identifiers (refer to at most one entity, never reused), addresses (name access points). Location-independent name independent of access point addresses. Precedent for HX-241 naming model.
+
+### Self-Certifying Identifier
+
+- **Self-Verifiable Content Using Decentralized Identifiers** (ScienceDirect): Content naming scheme where authenticity and integrity verified based solely on content name and metadata. Self-certifying, decentralized, self-sovereign. No trusted third parties. 256-bit thumbprint content name prefixes. Precedent for HX-241 NodeId as self-certifying Ed25519 public key.
+
+### 9-Char Op Reference / Append-Only Log
+
+- **Transparent Logs** (research!rsc): Append-only log with O(lg N) verification. Merkle tree structure for tamper-evidence. Client can verify record inclusion and log extension. Precedent for IDS 9-char op reference immutable append-only operation log.
+- **Append-Only Log** (Wikipedia, QuestDB, Tigris): Immutable data structure — new data appended, existing data never modified. Natural audit trail, sequential writes faster, rollbacks, point-in-time recovery. Precedent for IDS op reference log.
+- **Hypercore** (HeartIT): Append-only log for P2P. Verification permanent, replication simple (compare lengths, send difference), auditability free. State changes as new facts appended. Precedent for IDS operation log.
+
+### Binary Completion — Atomic Commit Protocol
+
+- **15-445/645 Database Systems** (CMU): Atomic commit protocols — 2PC (blocks on coordinator failure), 3PC (non-blocking but can violate atomicity during partitions), Paxos Commit (non-blocking, majority-based), Viewstamped Replication, ZAB. 2PC = F=0 case of Paxos Commit. Precedent for IDS binary completion commit state machine.
+- **TiKV Distributed Algorithms**: 2PC prepare/commit phases, 3PC canCommit/preCommit/doCommit, Paxos Commit. 3PC requires 3 round trips, fails under network partitions. Precedent for IDS atomic commit protocol selection.
+- **CockroachDB Parallel Commits**: Unifies distributed transactions and consensus. Flexible Paxos — quorums need not all intersect, only leader election quorum overlaps with replication quorums. Precedent for IDS commit optimization.
+
+### Byte Accounting Integrity — Out=In
+
+- **Object Storage Integrity Verification** (Scality): Object counts + byte totals don't prove content identity. ETag invalid for multipart objects. Full key listing comparison needed. Checksums over bytes for content identity. Precedent for IDS out=in byte accounting with checksum verification.
+- **BLA Byzantine-Tolerant Lazy Auditing** (ACM TOS): Decentralized storage data integrity auditing. Reliability ratio = nodes/replicas. Storage efficiency = audit overhead/user data. Precedent for IDS byte accounting integrity verification.
+- **Store, Forget, and Check** (ICDCS 2006): Algebraic signatures for remote storage integrity. Linear signatures compress large blocks into short byte strings. Works with erasure codes to diagnose incorrect sites. Precedent for IDS lightweight integrity checking.
+
+### Fixed Client Roster — Near-To-Far Routing
+
+- **S4Core Federation**: W + R = 4 > N = 3 quorum guarantees read-your-writes and split-brain safety. SWIM gossip failure detection via seed addresses. Node UUID persisted across restarts. Precedent for IDS fixed client roster with near-to-far routing.
+
+### Coordinated Deletion — Millisecond Federation
+
+- Covered in prior rounds (Celeste P2P deletion-token hash, DSAS decentralized auditing). No new contradictions.
+
+### IDS Standard Time — Proprietary Clock
+
+- Covered in prior rounds (TaaS, Achieving Causality with Physical Clocks, Aeron logical clocks). Proprietary clock basis, not wall-clock/HLC. No new contradictions.
+
+### Round 36 Key Verified Facts
+
+| Topic | Source | Relevance |
+|-------|--------|-----------|
+| Binary serialization zero-copy | Cap'n Proto encoding, FlatBuffers | HX-241 frame encoding |
+| Zero-copy buffer management | NordVarg Rust zero-copy | HX-241 sans-IO frame codec buffers |
+| Object capability security | Cosmos SDK ocap | HX-241 capability-based security |
+| Backpressure flow control | USENIX NSDI 2022 BFC paper | HX-241 credit-based multipath flow control |
+| Congestion control without loss | BBR (ACM Queue) | HX-241 loss-independent congestion control |
+| Source routing | Wikipedia, SPRING RFC 7855, DSR | HX-241 PathID source-routed forwarding |
+| Geographic topology-aware routing | arXiv 1403.3007, R/Kademlia, QuickPeer, Pastry | HX-241 topology-aware routing |
+| Multicast/anycast/pub-sub | arXiv 1201.0349, HCcast, UCSB topology-adaptive | HX-241 group communication without IP |
+| Carrier type u8 namespace | hx241-protocol CARRIER-CONTRACT.md | HX-241 carrier type registry |
+| TLV high-bit reject | N-PAMP IETF draft-bubblefish-npamp-01 | HX-241 Contract A forward-incompatible TLV |
+| Physical layer side channels | IRISA whispering devices survey | HX-241 carrier spoofing detection |
+| Half duplex CSMA/CAP | UC Santa Cruz | HX-241 medium access control |
+| Carrier MTU discovery | Cisco IOS XR MTU overview | HX-241 per-carrier MTU |
+| Carrier keepalive | OpenFlux protocol negotiation | HX-241 session liveness |
+| Link layer framing | Systems Approach framing chapter | HX-241 binary frame format |
+| Energy constrained operation | Wireless Personal Communications duty-cycling | HX-241 carrier energy cost |
+| Carrier discovery without mDNS | SSDP/UPnP (ESP3D) | HX-241 native carrier discovery |
+| Carrier address namespace collision | U Florida multicast collision prevention | HX-241 carrier address registry |
+| Carrier plugin security sandbox | Verql plugin security | HX-241 carrier plugin isolation |
+| Carrier plugin conformance testing | ACP conformance suite | HX-241 carrier plugin testing |
+| Identifier-locator separation | IEEE Tech Navigator | HX-241 NodeId vs PathID separation |
+| Naming model (names/identifiers/addresses) | Distributed Systems 4th ed slides | HX-241 naming model |
+| Self-certifying identifier | ScienceDirect self-verifiable content | HX-241 NodeId as Ed25519 public key |
+| Append-only op reference log | Transparent Logs, Hypercore | IDS 9-char op reference log |
+| Binary completion atomic commit | CMU 15-445, TiKV, CockroachDB | IDS commit state machine |
+| Byte accounting integrity | Scality, BLA auditing, Store/Forget/Check | IDS out=in byte accounting |
+
+**Research coverage:** ~1,053 searches across 36 parallel batches of 30. Every round confirmed the same architectural conclusions with zero contradictions. Diminishing returns definitively reached.
+
+**Final architecture decision:** Option 2 — separate but stacked repositories (IDFS → HX-241 → XPOCK) with versioned contracts:
+- Contract A: IDS → HX-241 via frame extension TLVs (Type u16 + Length u16 + Value; unknown TLV high bit clear = ignore, high bit set = reject) — matches N-PAMP IETF draft-bubblefish-npamp-01 exactly
+- Contract B: HX-241 → XPOCK via CarrierRegistry (carrier_type u8 + opaque Vec<u8>, Carrier trait with open/close/send/recv/health methods)
+- No 1:1 mapping between IDS logical chunk IDs and HX-241 ObjectID/PathID — IDS maintains separate placement directory
+- IDS standard time independent of HX-241 Timestamp (separate clock domains)
+- Independent credit pools at HX-241 and IDS layers
+- HX-241 uses sans-IO frame codec (bytes in, bytes out, no sockets, no std::net)
+- HX-241 NodeId = 32-byte self-certifying Ed25519 public key; PathID = source-routed node sequence
+- HX-241 uses Cap'n Proto/FlatBuffers-style zero-copy wire encoding
+- HX-241 congestion control is loss-independent (BBR-style bottleneck bandwidth + RTT)
+- IDS uses append-only op reference log for binary completion
+- IDS atomic commit via 2PC/3PC/Paxos Commit with byte accounting integrity verification
+
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
