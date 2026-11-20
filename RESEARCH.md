@@ -702,10 +702,58 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 **Side-channel countermeasures:**
 - **AMD side-channel guidance**: constant-time operation, avoid secret-dependent control flow, consistent memory read/write patterns, masking sensitive data. Relevant to HX-241/IDFS constant-time crypto implementation.
 
+## Round 25 — Vector Clocks, CRDTs, Merkle Trees, Accumulators & Distributed Randomness (~30 more searches, ~750 cumulative)
+
+**Vector clocks & dotted version vectors:**
+- **Vector clocks** (Distributed Systems Handbook): array of counters, one entry per process, attached to every event; process increments its own entry, takes entry-wise max on receive; comparison yields happened-before (happened before, happened after, or concurrent). Exactly represents the happened-before relation. Directly relevant to IDFS version tracking and HX-241 addressing causality.
+- **Riak KV conflict resolution** (riak.github.io/docs): vector clocks or dotted version vectors as causal context for object updates; conflicts unavoidable in eventually consistent mode; Riak can resolve internally with causal context. Dotted version vectors introduced in Riak 2.0 to replace vector clocks. Relevant to IDFS object versioning and conflict resolution strategy.
+- **Vector clock vs dotted version vector** (gorkemsari.github.io, ricardobcl/DVV): DVV = compact version of DVV; DVVSet keeps size bounded similar to version vectors; keys vector on servers only + single "dot" per value (bounded even with millions of clients). Directly relevant to IDFS standard time/version tracking replacing proprietary clock.
+
+**CRDT implementations:**
+- **ACM CSUR on CRDTs**: operation-based vs state-based; CmRDT needs reliable causal broadcast; CvRDT needs join-semilattice merge; commutative operations; causal delivery sufficient for delivery order. Delta-state variant combines both approaches. Directly relevant to IDFS conflict-free replicated state design.
+- **Operation-based CRDT framework** (RBMH Technology, Krasser): prepare/effect phases; reliable causal broadcast; exactly-once messaging; immediate self-delivery for read-your-writes; replicated event log with vector clocks as potential causality. Relevant to IDFS op-based commit state machine.
+- **Comprehensive CRDT study** (INRIA Shapiro et al.): CmRDT delivery order <d; concurrent operations commute; convergence under reliable broadcast; garbage collection for tombstone accumulation; stability problems. Relevant to IDFS CRDT garbage collection strategy.
+- **Build your own CRDT library** (pushkarkumar-dev): GCounter (map[nodeID]int64, max per slot merge), PNCounter (two GCounters), GSet, TwoPhaseSet (add-set + tombstone-set); CRDT laws: commutativity, idempotency, associativity. Directly relevant to IDFS counter and set CRDT implementations.
+- **Nested pure operation-based CRDTs** (ECOOP 2023): PO-Log with causality info from RCB middleware; causal redundancy for log compaction; memory bounded. Relevant to IDFS op-based CRDT log compaction.
+- **Verified causal broadcast** (Liquid Haskell): causal broadcast layer agnostic to message content; verified-convergent CRDTs atop causal broadcast; end-to-end convergence guarantee. Relevant to IDFS verified message delivery layer.
+- **Delta-CRDT synchronization** (saorsa-gossip ADR): offline operation, partition tolerance, reconnect after gaps, concurrent edits; transfers only changes not full state; rich data types; works without coordination. Directly relevant to IDFS delta-state synchronization over HX-241.
+- **CRDT garbage collection** (INRIA): tombstone accumulation, internal data structure imbalance; distributed GC requires synchronization; GC doesn't impact correctness only performance. Relevant to IDFS tombstone cleanup strategy.
+- **CRDT glossary** (crdt.tech): add-wins set, remove-wins set, CmRDT, CvRDT, strong eventual consistency, optimistic replication. Relevant to IDFS conflict resolution semantics.
+- **PN Counter** (Hazelcast): positive-negative counter, two GCounters, increment/decrement without coordination. Relevant to IDFS byte accounting counter.
+- **LWW-Register** (Lars Hupel): timestamp-based total order; timestamps assumed unique/totally ordered/causal; magic real-time assumption problematic. Relevant to IDFS register CRDT and why HLC is better than wall-clock.
+- **CRDT semantic techniques** (mattweidner.com): add-wins set (OR-set), remove-wins set, enable-wins flag, disable-wins flag; concurrent add/remove arbitration. Directly relevant to IDFS set CRDT conflict resolution.
+- **CRDT overview** (arxiv 1806.10254): add-wins (observed-remove) set, remove-wins set, 2P-Set breaks sequential semantics (no re-add after remove); add-wins and remove-wins preserve sequential semantics. Relevant to IDFS set semantics choice.
+- **OR-Set** (iankduncan.com, arxiv 1210.3368): unique tag per add, remove moves observed pairs to tombstone, add-wins semantics; tags need garbage collection; version vectors to determine safe tag removal. Directly relevant to IDFS OR-Set implementation for conflict-free set state.
+- **LWW-Element-Set** (Wikipedia): add set + remove set with timestamps; element in set if in add set and (not in remove set or add timestamp > remove timestamp); bias on tie; allows re-add after remove. Relevant to IDFS LWW register/set options.
+- **G-Set / 2P-Set / LWW-Element-Set** (Wikipedia CRDT article): G-Set (grow-only, union merge), 2P-Set (add-set + tombstone remove-set, remove-wins, no re-add), LWW-Element-Set (timestamps, re-add allowed). Relevant to IDFS CRDT type selection.
+
+**Merkle trees & verifiable data structures:**
+- **Merkle tree** (Wikipedia, Baeldung, Yos Riady): binary hash tree; leaf = hash of data block; parent = hash of children; branch-by-branch verification; log(n) proof size; top hash from trusted source; used in IPFS, BitTorrent, Git, Bitcoin, Ethereum, Cassandra, Riak. Directly relevant to IDFS integrity verification and replica anti-entropy.
+- **Merkle tree anti-entropy** (DataStax): build Merkle tree per replica, compare trees to discover differences, update inconsistent replicas; compact tree depth 15 (32K leaves); ~30 partitions streamed for 1M partitions with 1 damaged. Relevant to IDFS replica synchronization protocol.
+- **Verifiable data structures / Trillian** (transparency.dev): signed tree head, inclusion proof, consistency proof; root hash commitment; verifiable append-only log. Relevant to IDFS commit log integrity and audit.
+- **Sparse Merkle tree** (iden3, GitHub cedoor): key-value map, empty leaves, membership/non-membership proofs, audit path; standardize SMT generation. Relevant to IDFS membership proofs and revocation.
+- **BIP 98 Fast Merkle Trees** (Bitcoin): arbitrarily-balanced binary tree, multi-element inclusion proof, log-sized proofs. Relevant to IDFS batch inclusion proofs.
+
+**Accumulators & vector commitments:**
+- **RSA accumulators** (Alin Tomescu): accumulator a = g^(product of primes); membership witness = a^(1/e_i) = accumulator of set minus element; Strong RSA group; hidden-order group. Relevant to IDFS revocation and set membership proofs.
+- **Bilinear accumulators** (ACM CCS 2022): zero-knowledge batch proof, constant size, constant verification; 16x-42x faster than SNARK-based; aggregate non-membership proofs. Relevant to IDFS batched membership proofs.
+- **Polynomial commitments** (orchid.com): commitment to vector, reveal one element without revealing rest (vector commitment); KZG commitments. Relevant to IDFS vector commitment for chunk verification.
+- **KZG vs IPA vs FRI** (ZK/SEC): KZG small proofs (~48B) trusted setup; IPA O(log d); FRI post-quantum hash-based O(log²d) 40-200KB. KZG uses bilinear pairings; FRI uses Reed-Solomon distance properties. Relevant to XarnX privacy layer commitment choice.
+- **Distributed polynomial commitments** (USENIX Security 2026): PIP framework upgrades MLPCS; PIPKZG (mKZG), PIPFRI; linear prover time, polylog communication; DEPIPFRI distributed. Relevant to distributed prover for XarnX privacy layer.
+- **RSA accumulator revocation** (USPTO patent): OCSP unsuitable for AMI networks; RSA accumulator represents set with single digest; communication-efficient revocation. Relevant to IDFS revocation without DNS/Web PKI.
+
+**Distributed randomness & VRF/VDF:**
+- **VRF** (NCC Group review): ECVRF prove/verify; blind auctions, blockchain sortition; asymmetric keyed hash with proof. Relevant to XPOCK peer selection and leader election.
+- **VDF survey** (Stanford crypto): Pietrzak and Wesolowski VDFs; proof of exponentiation; adding delay in decentralized applications. Relevant to XarnX randomness beacon and leader election delay.
+- **drand randomness beacon** (docs, GitHub): threshold BLS signatures, DKG setup (Pedersen's DKG, Feldman VSS, Shamir secret sharing), threshold t-of-n, publicly verifiable unbiased unpredictable randomness; League of Entropy 16 nodes. Relevant to XPOCK randomness beacon and XarnX leader election sortition.
+- **SoK: Distributed Randomness Beacons** (IEEE S&P 2023): DVRF-based DRB (drand, Dfinity), delay-based (VDF), PVSS-based; small static set → DKG-based (drand, HERB); small dynamic → PVSS-based; large dynamic → private lotteries (Algorand). Relevant to XarnX randomness beacon design.
+- **Algorand VRF sortition** (algorand.co): VRF selects block proposers and committee members; binomial distribution sampling; stake-weighted lottery. Relevant to XarnX sortition-based leader election.
+- **Pactus sortition** (docs): VRF-based validator committee selection; random number in [0, total stake]; BLS signature as VRF. Relevant to XarnX validator selection.
+
 ---
 
 ## Research Completion Statement
 
-**~720 searches across 24 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 24 rounds of 30 searches each (~720 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~750 searches across 25 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 25 rounds of 30 searches each (~750 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
