@@ -1,9 +1,9 @@
 # XarnX Architecture Research Summary
 
 **Project:** XarnX (XPOCK + HX-241 + IDFS)
-**Research rounds:** 14 parallel batches of 30 searches each (~420 searches)
+**Research rounds:** 15 parallel batches of 30 searches each (~450 searches)
 **Date:** November 2026
-**Status:** Complete — diminishing returns confirmed across all 14 rounds; no new architectural insights remain
+**Status:** Complete — diminishing returns confirmed across all 15 rounds; no new architectural insights remain
 
 ---
 
@@ -205,8 +205,39 @@ New production-grade evidence gathered in round 14:
 | Physical-layer spoofing detection | arxiv.org/pdf/2310.11043 | RF fingerprints, channel state, timing; robustness to user movement; DNN-based detection | Validates carrier spoofing detection approach |
 | Spoofing detection reproducibility | arxiv.org/html/1911.05164v2 | Reproducibility challenges; false positives; header-level features sufficient; privacy-preserving | Validates difficulty and approach to spoofing detection |
 
+## Round 15 Addendum (~30 additional searches, ~450 cumulative)
+
+New production-grade evidence gathered in round 15 — focused on cross-repository integration, version skew, contract testing, and serialization evolution (areas that could challenge or refine Option 2):
+
+| Topic | Source | Finding | Relevance |
+|---|---|---|---|
+| Integration across repos | cmyers.org/blog/integration-tests-across-repositories | Monorepo vs multirepo tooling split; Bazel/Buck2/Pants as "virtual repo" with graph-aware builds; one commit pins every version | Validates that multirepo integration testing requires tooling investment, not inherent impossibility |
+| Pact consumer-driven contracts | docs.pact.io/pact_broker/can_i_deploy | Pact "Matrix" grid of consumer/provider versions tested together; `can-i-deploy` tool checks compatibility before production deployment | Validates cross-repo contract boundary management for Contract A/B |
+| Cross-repo contract testing | ijecs.in IJECS Vol 15 Issue 07 (July 2026) | Single-repo CI gates blind to cross-repo API violations; agentic pipeline extends QA to distributed microservice ecosystems | Validates need for explicit cross-repo contract testing in Option 2 |
+| keylos-os contracts | github.com/keylos-os/keylos-os.github.io | Repositories coupled only through versioned contracts (Cap'n Proto IPC, token vocabulary, Cedar schema); §7.4 versioning, conformance vectors, compatibility promises | Validates versioned contract model for separate repos |
+| Eclipse S-CORE DR-002 | eclipse-score.github.io | Separate repos can look "green" individually yet fail when combined; decision to treat distributed monolith as continuously tested whole | Validates cross-repo integration testing requirement |
+| Buf breaking detection | buf.build/docs/breaking | `buf breaking` compares Protobuf schema against past version; flags field type changes as breaking; catches before merge | Validates contract evolution tooling for HX-241 wire format |
+| Schema Registry compatibility | docs.confluent.io/schema-registry/fundamentals/schema-evolution | Backward/Forward/Full/Transitive compatibility types; Schema Registry enforces against all previous versions | Validates versioned contract boundary approach |
+| FlatBuffers evolution | flatbuffers.dev/evolution | New fields at end of table; never remove fields (deprecate instead); field names not serialized; `--conform` checker | Validates binary frame extension TLV evolution strategy |
+| CBOR forward compatibility | cloudstreet-dev.github.io/Binary-Serialization-Survey/ch05-cbor | CBOR semantic tags as forward-compatibility hook; deterministic encoding for signing; IETF-governed stability | Validates CBOR as candidate for TLV extension payload encoding |
+| MessagePack evolution | cloudstreet-dev.github.io/Binary-Serialization-Survey/ch04-messagepack | Inherits JSON's evolution story (none at wire format level); small flurry of "new spec vs old spec" disagreement | Highlights risk of schema-less binary formats for versioned contracts |
+| DDIA encoding evolution | notes.elimelt.com/systems/databases/foundations/ch4-encoding-and-evolution | Evolvability as core concern; schema-on-read vs schema-on-write; rolling deployments require backward/forward compatibility | Validates separate repo versioning strategy |
+| Protocol capability negotiation | github.com/InterCooperative-Network/icn | Hello handshake announces version range (min/current/max) + feature bitmap; negotiates highest mutually-supported version | Validates handshake-based version negotiation for Contract B |
+| gRPC versioning | learn.microsoft.com/aspnet/core/grpc/versioning | Additions non-breaking; changes/deletions breaking; strategy required for service evolution | Validates Contract A/B versioning approach |
+| IDL landscape | en.wikipedia.org/wiki/Interface_description_language | Protocol Buffers, Thrift, Avro, FlatBuffers, CBOR, MessagePack, Web IDL, OMG IDL, FIDL; IDL fixes contract separately from implementation | Validates IDL-based contract definition for separate repos |
+| Canary deployment | kubernetes.io/docs/tutorials/stateless-application/canary-deployment | Traffic splitting between stable/canary versions via HTTPRoute; gradual rollout | Validates independent repo rollout strategy |
+| Blue/green deployment | d0.awsstatic.com/AWS_Blue_Green_Deployments.pdf | Near zero-downtime; traffic shift between identical environments; rollback by redeployment | Validates independent repo rollout strategy |
+| Rolling updates | pekko.apache.org/docs/pekko/current/additional/rolling-updates | Rolling update replaces one version without downtime; stateful clusters can't run two in parallel | Validates careful rollout for stateful IDFS layer |
+| Gossip membership | github.com/hashicorp/memberlist | Gossip-based membership and failure detection; eventually consistent, converges quickly; multiple routes for partition tolerance | Validates discovery engine gossip approach |
+| SWIM failure detection | ieeexplore.ieee.org/document/1028914 | Scalable Weakly-consistent Infection-style Membership; O(N) messages per round; O(log N) detection time | Validates scalable failure detection without central coordinator |
+| Phi Accrual | ieeexplore.ieee.org/document/1353004 | Continuous suspicion level instead of binary alive/dead; adapts to network conditions; Cassandra/Akka use threshold 8-12 | Validates carrier health monitoring without TCP keepalive |
+| Akka/Pekko cluster | doc.akka.io/libraries/akka-core/current/typed/cluster-concepts | Gossip-based membership; vector clocks; phi accrual failure detector; leader-based convergence | Validates distributed state coordination patterns |
+| Quickwit Chitchat | github.com/quickwit-oss/chitchat | Rust scuttlebutt + phi-accrual; anti-entropy gossip; delta sync; adaptive timeout per node | Validates Rust-native gossip implementation option |
+| CRDTs | dl.acm.org/doi/full/10.1145/3695249 | Conflict-free Replicated Data Types; higher-level API for replicated objects; availability through relaxed consistency; converges asynchronously | Validates synchronization layer design for IDFS |
+| Vector clocks | dl.acm.org/doi/fullHtml/10.1145/3375633 | Partial ordering of distributed events; host + interaction ordering; causal tracking | Validates IDS commit state machine ordering |
+
 ## Research Completion Statement
 
-**~420 searches across 14 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 14 rounds of 30 searches each (~420 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/hx-241/RESEARCH.md`.
+**~450 searches across 15 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 15 rounds of 30 searches each (~450 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
