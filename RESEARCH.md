@@ -750,10 +750,67 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 - **Algorand VRF sortition** (algorand.co): VRF selects block proposers and committee members; binomial distribution sampling; stake-weighted lottery. Relevant to XarnX sortition-based leader election.
 - **Pactus sortition** (docs): VRF-based validator committee selection; random number in [0, total stake]; BLS signature as VRF. Relevant to XarnX validator selection.
 
+## Round 26 — Forward Secrecy, Key Management, Identity & Anonymity (~30 more searches, ~780 cumulative)
+
+**Forward secrecy & post-compromise security:**
+- **Signal Double Ratchet** (signal.org): root chain + sending chain + receiving chain per session; forward security = past output keys stay random if KDF key compromised later; break-in recovery = future keys stay random if future inputs add entropy; skipped message keys introduce DoS risk via storage exhaustion. Directly relevant to HX-241 session key derivation and IDFS message encryption.
+- **PCS healing** (USENIX Security 2021): post-compromise security captured in secure group messaging; cross-group effects matter; pairwise PCS channels heal authentication better than group-key protocols (ART, TreeKEM/MLS); global updates + PCS signatures enable stronger healing. Relevant to HX-241 session recovery after key compromise.
+- **Distributed collaborative key agreement** (ICNP 2002): interval-based rekeying trades weaker security (departed user accesses until next interval) for better performance; rebuild/batch/queue-batch algorithms. Relevant to HX-241 group session rekeying.
+
+**Key revocation & expiration:**
+- **Passive revocation** (SmallStep): short-lived certificates = expire naturally, no centralized CRL/OCSP infrastructure needed; reliability issues with active revocation (CRL/OCSP) make passive revocation preferable in practice. Directly relevant to XarnX PKI without DNS/Web PKI.
+- **Key expiration / TTL patterns** (Redis, Valkey, Clustron, Telnyx): EXPIRE/EXPIREAT absolute vs relative expiry; TTL management across distributed clusters; PEXPIRETIME for absolute timestamps; expiration accuracy 0-1ms variation; atomicity concerns with multi-key expiry in scripts. Relevant to HX-241/IDFS key lifetime management.
+- **Redis distributed locks** (Redis docs): SET NX PX for lock acquisition; majority-of-instances Redlock; MIN_VALIDITY = TTL - (T2-T1) - CLOCK_DRIFT; lock value = unique random token. Relevant to HX-241 distributed mutual exclusion.
+- **Grove verified leases** (SOSP 2023): time-bounded invariant per key, lease expiration tracked in global invariant + per-node lock invariant; Get/Put wait until lease expires. Relevant to formally verified IDFS lease management.
+- **Locker** (Erlang): atomic distributed check-and-set for short-lived keys; quorum-based consistency for writes, availability for reads; lease extension as anti-entropy; synchronized clocks not required but progress rate similar. Relevant to XPOCK leader election via lease.
+
+**Identity & credentials:**
+- **W3C DIDs v1.0/v1.1** (W3C): did: URI scheme = scheme + method + method-specific-id; DID documents with verification methods (Multikey, etc.), services, authentication; decoupled from centralized registries/identity providers/CAs; DID methods define create/resolve/update/deactivate; verifiable data registry (VDR) = tamper-evident immutable log, blockchains or Merkle-proof solutions; DID resolution produces DID document; establishing DID = entropy → first verification method → Create operation. Directly relevant to XPOCK/XarnX identity without DNS.
+- **DID Methods registry** (W3C): dozens of methods (did:web, did:key, did:eth, did:ion, did:btc, etc.); each defines its own registry and resolution. Relevant to XPOCK DID method choice.
+- **W3C Verifiable Credentials v2.0**: issuer/holder/verifier three-party ecosystem; tamper-evident credentials; machine-readable digital credentials (driver's license, education, healthcare). Relevant to XarnX capability credentials.
+- **SSI survey** (ACM CSUR): self-sovereign identity model structure, standardized components, principals; decentralized operations across platforms/domains; creation, storage, sharing, verification lifecycle. Relevant to XarnX identity architecture.
+
+**PKI & transparency:**
+- **Certificate Transparency** (certificate.transparency.dev): append-only public logs of certificates; monitors cryptographically check inclusion; user agents enforce CT; precertificates + SCTs; post-issuance validation. Relevant to XarnX certificate transparency without DNS/Web PKI.
+- **RFC 3161 Time-Stamp Protocol**: X.509 PKI time-stamping; Time-Stamp Authority (TSA) issues time-stamp tokens; updated by RFC 5816. Relevant to IDFS commit log timestamping.
+
+**Accumulators & vector commitments:**
+- **Merkle Mountain Range** (Commonware): append-only Merkle tree variant; extreme performance on append (cached reads, single contiguous write); binary tree of perfect trees; simulates updates via re-append. Relevant to IDFS append-only commit log.
+- **Utreexo** (MIT DCI, GitHub, BIP-0181/0182): hash-based dynamic accumulator for UTXO set; merkle forest of perfect binary trees; logarithmic-size accumulator (roots only); inclusion proofs at spend time; bridge/prover holds full forest, verifier holds roots only; no trusted setup; proofs add ~25% bandwidth; compact state node (~1KB roots) vs bridge node (full forest). Directly relevant to IDFS state accumulator and revocation without trusted setup.
+- **SNARK vs STARK SoK** (ACM WebConf 2026): zk-SNARKs 68x faster proof gen, 123x smaller proofs; zk-STARKs transparent/post-quantum but larger proofs; Groth16 representative SNARK. Relevant to XarnX privacy layer ZKP choice.
+- **FROST** (ZF): threshold Schnorr signatures; t-of-n key shares; signature indistinguishable from non-threshold; only supports Schnorr not ECDSA; key generation options. Relevant to HX-241 threshold signatures and IDFS multi-owner custody.
+- **Aggregatable DKG** (Anoma): Verifiable Secret Sharing (VSS) protects against malicious dealer; Feldman VSS broadcasts homomorphic commitments to polynomial coefficients; parties verify share consistency via commitments. Relevant to HX-241/IDFS distributed key generation.
+- **Proactive secret sharing** (Berkeley EECS-2019-62): periodic share refresh without altering secret; attackers must compromise d+1 nodes within time period; used in blockchain key storage; node churn challenge. Relevant to HX-241 key rotation.
+- **Verifiable secret sharing** (Springer, decentralizedthoughts, Wikipedia): BGW VSS with Feldman simplifications; validity/hiding/binding properties; Reed-Solomon error correction for incorrect shares; n > 3f requirement; Feldman's scheme = Shamir + homomorphic commitments; Pedersen = unconditional hiding computational binding. Relevant to IDFS multi-owner custody and HX-241 key sharing.
+- **Distributed Key Generation for the Internet** (Kate/Goldberg): asynchronous DKG for Internet; Byzantine agreement necessary; Feldman VSS basis; proactive VSS; group modification primitives. Relevant to HX-241 DKG.
+- **NI-DKG** (ePrint 2026/552): non-interactive DKG via ZK proofs; zk-SNARK proves contribution correctness; smart contract as bulletin board; single submission per participant; simplifies to non-interactive phases. Relevant to XarnX DKG without interaction.
+- **Verifiable Secret Redistribution** (CMU-CS-01-155): non-interactive VSR for Shamir shares; SHARES-VALID and SUBSHARES-VALID conditions; redistribution to different threshold; guards against n-m faulty old shareholders with m > n/2. Relevant to IDFS share redistribution on node churn.
+- **$\Pi$ unified VSS framework** (ePrint 2023/1669): computational VSS without homomorphic commitments; random oracle + hiding/binding commitment; $\Pi_P$/$\Pi_F$ DL-based; $\Pi_{LA}$ hash-based PQ-secure. Relevant to PQ VSS for HX-241.
+- **Bingo VSS/ADKG** (UCL): adaptivity and asynchrony in VSS and DKG; VABA protocol; recover in exponent for BLS public key; 2f+1-one-more discrete log assumption. Relevant to asynchronous DKG for HX-241.
+
+**Key lifetime management:**
+- **Key rotation strategies** (Calimero Core): sealed-session keys (1 hour), transport key (until process stop), receipt key (until node replaced), session token (15 min), backup key (until replaced); revocations as system commands applied cluster-wide; revoked session remembered for hour. Directly relevant to HX-241 key lifecycle.
+- **TTL/expiration patterns** (Redis/Valkey/Clustron/Telnyx): EXPIREAT absolute timestamps for atomic multi-key expiry; passive vs active expiry; TTL management across clusters. Relevant to HX-241 session/key TTL.
+- **Forward secrecy** (Springer): long-term key exposure doesn't compromise past session keys; forward security = system security ensured against future key exposure. Relevant to HX-241 session key design.
+
+**Anonymity & privacy:**
+- **Social key recovery** (adorsys): splitting secret into shards, sending to buddies, recovery from distributed shards; blockchain prototype. Relevant to IDFS social key recovery.
+- **Visual cryptography** (MDPI 2026): image reconstruction only when threshold shares combined; human visual system decryption; theoretical/construction focus; attack vectors. Relevant to XPOCK physical key sharing.
+- **LSB steganography** (daniellerch.me): least significant bit embedding in images/audio; LSB replacement vs matching; extraction; dangers of replacement. Relevant to XarnX covert channel.
+- **Network covert channels survey** (IEEE): storage-based (protocol field redundancy) vs timing-based (traffic interval modulation); detection via statistical analysis + ML. Relevant to XarnX covert communication.
+- **Mixnet optimization** (PoPETS 2022): mix nodes decrypt/pad/re-randomize; Sphinx packet format; randomized delay; traffic analysis yields probabilistic input-output linking. Relevant to XarnX anonymous communication.
+- **Tor circuit creation** (Tor spec): choose end node + path chain (no router twice); CREATE/CREATE2 cells; circID management. Relevant to XarnX onion routing.
+- **Garlic routing** (I2P): layered encryption + bundling multiple messages; ElGamal/AES; tunnels vs circuits. Relevant to XarnX anonymous routing.
+- **Dining Cryptographers** (Chaum 1988, Journal of Cryptology): unconditional sender/recipient untraceability; one-time keys for unconditional security, public keys for cryptographic security. Relevant to XarnX anonymous broadcast.
+- **k-anonymity/l-diversity/t-closeness** (Utrecht handbook): k-anonymity = indistinguishable from k-1 others w.r.t. quasi-identifiers; generalization/suppression; l-diversity = sensitive attribute diversity; t-closeness = distribution distance. Relevant to IDFS data privacy.
+- **Local differential privacy survey** (arxiv 2309.00861): LDP vs global DP; BLENDER fusion; geo-indistinguishability; metric-based LDP. Relevant to XarnX differential privacy layer.
+- **Private Set Intersection** (ScienceDirect survey, NIST CSRC, Pinkas Phasing, ePrint 2022/334, ePrint 2016/930, ePrint 2022/1011, ePrint 2024/566, OpenMined PSI): two+ parties compute set intersection without revealing non-common elements; building blocks HE/OT/OPRF; Phasing permutation-based hashing; OT extension scalability (billion-element sets); structure-aware PSI for fuzzy matching; third-party PSI reveals result only to inputless party; ECDH + Bloom/GCS containers. Relevant to XPOCK private contact discovery and IDFS private membership tests.
+- **Oblivious RAM** (MIT 6.5610): server memory changes vs static DB; polylog(n) vs linear server cost; supports reads+writes vs reads only; PRF-based vs public-key; Path ORAM most efficient; used by Signal contact discovery. Relevant to IDFS access-pattern privacy.
+
 ---
 
 ## Research Completion Statement
 
-**~750 searches across 25 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 25 rounds of 30 searches each (~750 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~780 searches across 26 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 26 rounds of 30 searches each (~780 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
