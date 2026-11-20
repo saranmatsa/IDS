@@ -545,10 +545,64 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 - **Post-quantum migration** (OWASP cheat sheet): inventory crypto dependencies, prioritize, adopt supported implementations, test, roll out. Start preparation even when migration not yet possible.
 - **Random number generation** (Rust Rand Book): CSPRNG = cryptographically secure PRNG with large state, no efficient prediction algorithm. RngCore trait. rand::rng() for non-deterministic source.
 
+## Round 22 — Physical Layer, Storage Integrity, Operations & PKI (~30 more searches, ~660 cumulative)
+
+**Physical layer & modulation:**
+- **Digital modulation** (IEEE Technology Navigator): ASK/FSK/PSK/QAM/OFDM — encoding digital data onto analog carrier by varying amplitude/frequency/phase. Modulation is the physical-layer primitive that carries bits over any medium (radio, optical, cable, telephone). HX-241 carrier layer maps to this without IP/TCP/UDP.
+- **Media Access Control** (Sogang University ch12): ALOHA, CSMA, CSMA/CD, CSMA/CA, reservation, polling, token-passing, FDMA, TDMA, CDMA. Random-access vs reservation vs controlled access. MAC is how multiple carriers share a medium without central coordination — directly relevant to XPOCK carrier access.
+- **Forward error correction** (AIP Conference Proceedings): Turbo, Hamming, LDPC, Convolutional, RS, Polar, BCH codes. RS and Hamming notable for correction capability. ARQ vs FEC. FEC adds redundancy at physical layer so receivers can correct errors without retransmission — relevant to HX-241 reliability over lossy carriers.
+- **Fountain codes / rateless codes** (Error Correction Zoo, Wikipedia, CMU lecture): LT codes, Raptor codes, Tornado codes. Rateless = generate unlimited encoded symbols from k source symbols; decode from any k+ε subset. Raptor codes: linear encoding/decoding, used in 3GPP MBMS, DVB-H, IETF RFC 5053. Directly relevant to IDFS erasure coding over unreliable carriers.
+- **Network coding / RLNC** (IEEE ComSoc, Wikipedia, MIT IT-Forum): intermediate nodes combine packets algebraically; RLNC uses random coefficients over Galois field GF(2^8); any k linearly independent coded packets recover k source packets; recoding without decoding; coded TCP (Medard); sliding-window coding. Rust crate `rlnc` implements full RLNC over GF(2^8). Directly relevant to HX-241 hop-by-hop reliability without TCP retransmission.
+
+**Storage integrity & deduplication:**
+- **Content-defined chunking / deduplication** (arxiv 2409.06066): CDC splits files into chunks by content fingerprint (rolling hash), not fixed boundaries. Deduplicated chunks stored once, referenced by fingerprint. Boundary-shift problem, Rabin fingerprint. Relevant to IDFS chunk storage and network transfer efficiency.
+- **Compression algorithms** (mtswat review): Deflate (LZ77+Huffman), LZ77/LZW/LZSS/LZMA/LZ4/Zstd/Brotli, arithmetic coding, PPM, RLE, delta encoding. Dictionary vs entropic vs predictive. Zstd/Brotli recommended over Deflate. Relevant to IDFS chunk compression before HX-241 transport.
+- **Silent data corruption / bit rot** (Scality): bad data returned without error; detected via checksums stored separately and recomputed on read; scrubbing (light/deep) catches corruption; repair from replica/erasure code. Relevant to IDFS data integrity verification over HX-241 frames.
+
+**Data integration & event patterns:**
+- **Change data capture** (Microsoft Learn, Debezium, Databricks, IBM): captures inserts/updates/deletes from database transaction logs (WAL/binlog/redo log); log-based CDC minimal production impact; timestamp-based and trigger-based alternatives; change feed with operation type + sequence number for ordering. Relevant to IDFS commit log and change propagation.
+- **Event sourcing / CQRS** (Confluent): event store = append-only log of state-changing events; CQRS separates write side (commands) from read side (queries); computations done at write time, not read time. Relevant to IDFS commit state machine and read model.
+- **Saga pattern** (AWS): orchestration (central coordinator) vs choreography (event-driven, no central coordinator). Compensating transactions for rollback. Relevant to IDFS multi-step commit across H-units.
+
+**Distributed transactions & streaming:**
+- **Two-phase commit** (TiKV deep dive): atomic commitment protocol; prepare + commit/rollback phases; blocking coordinator failure; participant logging for recovery. Widely used but not resilient to all failures. Relevant to IDFS atomic commit across replicas.
+- **Stream processing** (Confluent Kafka): windowed aggregations, stream-to-table joins, filtering, deduplication, resilience to late/out-of-order data. Relevant to IDFS real-time change propagation.
+- **Message queues** (NATS comparison): NATS, Kafka, RabbitMQ, Pulsar, gRPC compared. NATS: 48 client types, lightweight pub/sub. Kafka: high-throughput log. Pulsar: multi-tenant, geo-replication. Relevant to IDFS inter-service messaging.
+- **Pub/sub** (Google Cloud Pub/Sub): publisher → topic → subscription → subscriber; decoupled senders/receivers; schema governs message format. Relevant to IDFS event distribution.
+
+**Actor model & workflow:**
+- **Actor model / Orleans** (Microsoft Research): virtual actors abstraction; reliability, distributed resource management, scalability. Orleans simplifies distributed programming. Relevant to IDFS node actors.
+- **Workflow engine / Temporal** (Temporal docs): durable execution; workflow execution maintains state and progress across failures/crashes; event history; replays history to recover state. Relevant to IDFS long-running commit operations.
+
+**Formal specification:**
+- **Formal specification languages** (IEEE, Wikipedia, Buttondown): Z notation, VDM, B/Event-B, Alloy, TLA+, CSP, CCS, Petri nets. Alloy: lightweight, relational logic, automatic analyzer, bounded scope checking (small-scope hypothesis). Z: set theory + schemas, used by Praxis correct-by-construction. B/Event-B: refinement, proof obligations. Relevant to specifying HX-241/IDFS contracts formally before implementation.
+
+**Operations & observability:**
+- **Deployment / shadow / canary** (AWS): canary = incremental traffic shift to new model; shadow = new model runs alongside old, receives traffic but responses discarded. Deployment strategies for independent repo rollout. Relevant to XarnX separate-repo deployment.
+- **Feature flags** (Unleash): decouple code deployment from feature release; release flags, experiment flags, ops flags, permission flags. Relevant to XarnX contract rollout without redeploy.
+- **Observability / golden signals / RED / USE** (Grafana, ClickHouse, New Relic, Cisco DevNet, OpenObserve): four golden signals = latency, traffic, errors, saturation. RED = rate, errors, duration (service-side). USE = utilization, saturation, errors (resource-side). Alert on symptoms not causes. SLO-based alerting. Relevant to XarnX observability across layers.
+- **Log aggregation** (Sesame Disk): push-based (Filebeat/Fluentd) vs pull-based (Loki/Promtail); full-text indexing (ELK) vs label-based (Loki). Relevant to XarnX log collection across separate repos.
+
+**Incident & disaster recovery:**
+- **Incident management** (Google SRE): alert timely, cover user-facing functionality, alert on symptoms not causes, actionable, SLO-based alerting. On-call process, post-mortem, blameless. Relevant to XarnX operations.
+- **Backup strategy / disaster recovery** (AWS): RTO (acceptable delay to restore service), RPO (acceptable data loss). Comprehensive backup strategy defines what, how often, monitored. Relevant to IDFS backup/recovery.
+
+**Multi-region & compliance:**
+- **Multi-region architecture** (AWS): data sovereignty = legal requirement data stored/processed in specific geographic boundaries; GDPR, UK Data Protection Act, German BDSM. Multi-region for regulatory compliance, not just HA. Relevant to IDFS jurisdiction/failure domain mapping.
+- **Compliance architecture** (DevelopersVoice): GDPR principles — lawfulness/fairness/transparency, purpose limitation, data minimization, accuracy, storage limitation, integrity/confidentiality. Relevant to IDFS data custody and responsibility graph.
+
+**Key management & PKI:**
+- **Key management** (OWASP cheat sheet): generation within FIPS 140-2/140-3 module, secure distribution, hardware modules preferred, key lifecycle (generate, distribute, store, use, rotate, destroy). Relevant to HX-241 key establishment and rotation.
+- **Certificate Transparency** (DigiCert): CA issues precertificate → logs to CT log → gets SCT → issues certificate → browser validates SCT via OCSP stapling/TLS extension. Post-issuance validation. Relevant to XarnX PKI without DNS/Web PKI.
+- **PKI / trust store** (BSI TR-03145): asymmetric key pair, certificate binds public key to identity, CA hierarchy (root/intermediate/issuing), trust store / root store. Relevant to XarnX identity and authentication without DNS.
+
+**Object-capability security:**
+- **Object-capability model** (ACM Queue article): capability-based authorization vs identity-based; POLA (principle of least authority); Eselsohr reference implementation; browser changes needed for full ocap. Relevant to XarnX capability-based access control replacing identity-based models.
+
 ---
 
 ## Research Completion Statement
 
-**~630 searches across 21 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 21 rounds of 30 searches each (~630 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~660 searches across 22 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 22 rounds of 30 searches each (~660 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
