@@ -421,8 +421,74 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 | Distributed Merkle tree DHT | cs.brown.edu/cgc/stms/papers/adht-tech-rep.pdf | Distributed Merkle tree over P2P DHT; authenticated DHT; signature amortization | Validates HX-241 authenticated discovery |
 | CDC chunking survey | arxiv.org/html/2409.06066v3 | Content-defined chunking; boundary-shift problem; rolling hash; Rabin fingerprint | Validates IDFS deduplication option |
 
+## Round 20 — Implementation-Facing Patterns (~30 more searches, ~600 cumulative)
+
+**Implementation & engineering patterns:**
+- **Sans-IO pattern in Rust** (Firezone): fast exhaustive tests, deep customisation, high assurance. `handle_timeout`/`poll_transmit`/`handle_input` pattern; almost no `tokio::spawn`; multiplexed via single socket. Confirms HX-241 sans-IO frame codec approach is production-proven.
+- **Threat modeling** (OWASP cheat sheet, STRIDE): six categories — spoofing, tampering, repudiation, information disclosure, DoS, elevation of privilege. Four-phase process: diagram → identify → mitigate → validate. STRIDE-per-Element/per-Interaction variants for finer granularity.
+- **Formal security verification**: ProVerif (unbounded sessions, Horn clause resolution, symbolic/Dolev-Yao model, used for TLS 1.3, 5G-AKA, ARPKI), Tamarin (multiset rewriting, temporal first-order properties, automatic + interactive modes), AVISPA, Scyther. ProVerif proves secrecy/authentication; Tamarin supports observational equivalence and post-compromise security.
+
+**Configuration & deployment:**
+- **Configuration management at scale** (MortalApps): local disk caching to survive control plane outages; push-based propagation; feature flags decoupled from code deploys; automated configuration drift detection.
+- **Deployment strategies** (Home Office Engineering): canary, blue-green/red-black, rolling; feature switching; A/B testing; alignment with database migration strategy.
+
+**Reliability & backup:**
+- **Redundancy, replication, backup** (Microsoft Learn): RTO (recovery time objective), RPO (recovery point objective); replication = real-time copies across locations; backup = point-in-time copies.
+- **Multi-tenant security** (OWASP): isolation strategies — separate databases (strongest, highest cost), separate schemas (disciplined grants), shared tables with row-level policies (requires enforceable tenant ownership), hybrid by workload tier.
+
+**Rate limiting & QoS:**
+- **Distributed rate limiting** (Pratyush): token buckets encode sustained rate + burst; admission control sits before scarce work; leased regional quota with HA allocator; overshoot calculation per enforcement step.
+- **QoS strategies** (Cisco Press): best-effort (BE), Differentiated Services (DiffServ), Integrated Services (IntServ); different prioritization and delivery guarantees per model.
+
+**Congestion control:**
+- **BBR** (CACM): congestion-based, not loss-based; bottleneck bandwidth estimation + RTT propagation; converges to fair share whether competing with BBR or loss-based flows; unmanaged buffers >BDP cause bloat.
+
+**Routing:**
+- **Routing algorithm comparison** (Ronutz): distance vector (RIP/Bellman-Ford — tell neighbors what you know) vs link state (OSPF/SPF — give everyone the map) vs path vector (BGP). Each has distinct convergence, overhead, and loop-prevention properties.
+
+**Encapsulation / tunneling:**
+- **Tunneling & encapsulation** (Cloudflare, OpenStack, Broadcom, Red Hat, Cisco, RFC 8926/Geneve, RFC 9638/NVO3): GRE, VXLAN, NVGRE, STT, IP-in-IP, Geneve. Overlay over underlay; Geneve flexible options infrastructure for extensibility; NVO3 design team converged on single data plane encapsulation for interoperability. None of these require IP as HX-241 foundation — they use IP underlay, which HX-241 deliberately avoids.
+
+**Fragmentation & MTU:**
+- **Fragmentation** (Microsoft Azure): occurs at IP layer; Don't Fragment bit; path MTU discovery; DF bit prevents intermediate fragmentation. HX-241 handles fragmentation at hop-by-hop layer without IP.
+
+**Service discovery:**
+- **Service registries** (Semicolony, Big Iron, etcd vs Consul vs ZooKeeper): etcd (Raft, linearizable, CP; no built-in health checks/DNS — building block), Consul (Raft + gossip Serf, health checks, DNS+HTTP, multi-datacenter, service mesh), ZooKeeper (ZAB, ephemeral znodes, heavy Java), Eureka (AP, stale data during partitions acceptable), Kubernetes (CoreDNS + etcd + EndpointSlices). CP registries refuse writes during partition; AP registries serve possibly-stale data. xDS protocol (CDS/EDS/RDS/LDS) standard for service mesh control plane → data plane.
+
+**Health checking:**
+- **Kubernetes probes** (Kubernetes docs): liveness (is container alive?), readiness (ready to serve traffic?), startup (initialization complete). HTTP GET health checks with initialDelaySeconds/periodSeconds. Probe failure triggers container restart or endpoint removal.
+
+**Load balancing:**
+- **Load balancing algorithms** (System Design Space): round robin, least connections, consistent hashing; connection count stops meaning load on multiplexed HTTP/2/gRPC; selection by measured latency replaces connection count in those cases.
+
+**Circuit breaking:**
+- **Circuit breaker pattern** (AWS Prescriptive Guidance): prevent retries to failing callee; detect when callee is functional again; stops cascade failure across microservices collaboration.
+
+**Retry / backoff / timeout:**
+- **Retry strategy** (Google Cloud): idempotency determines retry safety; transient vs permanent errors; don't layer retries unnecessarily.
+- **Cascading failures** (Google SRE): naive retries amplify load (10 RPC attempts per logical request); deadlines define request wait time; cap concurrent requests.
+
+**Buffering & flow control:**
+- **Bufferbloat / FQ_CoDel** (OPNsense): excessive buffering causes multi-second latency; AQM/SQM eliminates it; FQ_CoDel sends small flows promptly, large flows share bottleneck capacity.
+- **Fair queuing** (Intronetworks): WFQ assigns bandwidth percentages per class; deficit round robin O(log n); preserves class ratios when some classes idle.
+
+**Resource allocation:**
+- **Max-min fair allocation** (MDPI Mathematics): Pareto efficiency, sharing incentive, envy-freeness, group strategy-proofness; polynomial-time algorithm for bounded task counts.
+
+**Isolation & sandboxing:**
+- **Container isolation** (NIST SP 800-190, NISTIR 8176, Datadog, AquaSec): Linux namespaces (PID, network, mount, UTS, IPC, user, cgroup, time) isolate views, not kernels; cgroups bound CPU/memory/disk I/O; seccomp filters syscalls; shared kernel means kernel bug affects all containers; gVisor sandbox adds syscall arbitration layer; namespaces + cgroups + seccomp + MAC (AppArmor/SELinux) = defense in depth.
+
+**Service mesh:**
+- **Istio architecture** (Istio docs): data plane = Envoy sidecar proxies mediating all service-to-service traffic + telemetry; control plane = istiod configuring proxies; xDS protocol family (CDS clusters, EDS endpoints, RDS routes, LDS listeners) standard for control→data plane.
+
+**Edge / fog / CDN:**
+- **Fog computing** (NIST SP 500-325): layered model between end-devices and centralized cloud; fog nodes organized vertically (isolation), horizontally (federation), or by latency-distance to devices; minimizes request-response time.
+- **CDN reference architecture** (Cloudflare): cache content close to end users at edge data centers; decrease latency, increase performance, availability, redundancy, security.
+
+---
+
 ## Research Completion Statement
 
-**~570 searches across 19 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 19 rounds of 30 searches each (~570 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~600 searches across 20 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 20 rounds of 30 searches each (~600 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
