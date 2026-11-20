@@ -649,10 +649,63 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 - **FLP impossibility** (Fischer, Lynch, Paterson 1985): deterministic consensus impossible in async system with even one crash fault; bivalency argument; cannot distinguish crashed from slow; circumvented by randomization, failure detectors, partial synchrony. Directly relevant to HX-241/IDFS consensus design — must accept partial synchrony or randomized consensus.
 - **Byzantine consensus survey**: consensus fundamental to atomic broadcast, atomic commit, group membership, state machine replication; FLP leads to workarounds (randomization, failure detectors, partial synchrony, wormholes). Relevant to HX-241 security model (crash vs Byzantine fault assumptions).
 
+## Round 24 — Object Storage, Locking, Election, Storage Engines, Clocks & Crypto Libraries (~30 more searches, ~720 cumulative)
+
+**Object storage:**
+- **Amazon S3** (All Things Distributed): metadata subsystem separate from data; persistence tier + caching; strong consistency achieved by synchronizing cache across cores; per-object metadata in discrete subsystem. Direct precedent for IDFS object model and consistency evolution.
+- **OpenStack Swift** (docs): Proxy Server routes via Ring; ring maps account/container/object to servers; handoff server for unavailable targets; objects streamed directly through proxy without spooling; erasure code policies supported. Direct precedent for IDFS placement ring and failover routing.
+- **MinIO / AIStor** (docs, product brief): per-object inline erasure coding (Reed-Solomon), EC:8 tolerates losing up to half drives; HighwayHash for bitrot detection; deterministic hash of object path selects erasure set (no external catalog, no 2PC); metadata co-located with object data; stateless, symmetrical architecture; self-healing from parity shards; read quorum K = data shards required. Direct precedent for IDFS erasure coding, bitrot healing, and quorum-based reads/writes.
+
+**Distributed locking & leader election:**
+- **Redlock critique** (Martin Kleppmann): Redlock works correctly only under synchronous system model — bounded network delay, bounded process pauses, bounded clock error. FLP implications: cannot distinguish crashed from slow. Timeouts are not ideal but used in practice. Directly relevant to HX-241/IDFS lock design — must not assume synchrony.
+- **etcd lease & lock** (etcd docs): lease = time-bounded token granted by server; lock APIs built on leases; MVCC data model needed for transactional memory beyond simple strong consistency. Relevant to HX-241 session lease and IDFS lock design.
+- **Bully algorithm** (Wikipedia, UMass lecture notes): highest ID wins; election messages to higher-ID nodes; OK/Alive and I won/Coordinator messages; O(n²) worst-case messages; assumes synchronous system, reliable message delivery, failure detector, all nodes know all IDs. Fragile under partitions — both sides can elect different leaders (split-brain). Relevant to HX-241 leader election options.
+- **Ring algorithm** (Chang-Roberts, ETH lecture notes): logical ring; election message circulates carrying max ID; coordinator message announces result; O(n) best case, O(n²) when multiple elections; deterministic election impossible in anonymous rings (symmetry); randomization helps break symmetry. Relevant to XPOCK ring-based leader election.
+- **Leader election survey** (Semicolony): two leaders = split-brain disaster; silent inconsistency worse than downtime; randomized timeouts prevent vote-splitting (Raft, etcd, Consul, CockroachDB, TiKV, Kafka KRaft). Bully/Ring elect different leaders under partition. Majority quorum ensures at most one leader per term. Directly relevant to HX-241 consensus-based leader election.
+
+**Storage engines:**
+- **B-tree vs LSM-tree** (TiKV, PostgreSQL, Small Datum, HLD Handbook): B-tree = update-in-place, read-optimized, page-level write amplification (16-256x for small random writes), needs WAL for crash safety; LSM-tree = append-only memtable + WAL, flush sorted SSTables, background compaction, write-optimized but read amplification (check multiple levels, bloom filters needed), space amplification (tombstones, old versions), compaction competes for I/O causing p99 spikes. Cannot minimize read, write, and space amplification simultaneously — amplification triangle. Directly relevant to IDFS metadata storage engine choice.
+- **WAL / write-ahead logging** (SQLite, PostgreSQL, CMU 15-445): STEAL + NO-FORCE system; log records flushed before data pages; roll-forward (REDO) + roll-backward (UNDO); group commit batches log flushes; checkpoints move WAL back to data file; WAL header + frames (SQLite); pageLSN/recLSN/flushedLSN (ARIES). Relevant to IDFS commit log durability.
+- **MVCC** (PostgreSQL): each statement sees a snapshot of data as of some time; multiversion model minimizes lock contention; snapshot isolation. Relevant to IDFS read path and concurrent access.
+- **Isolation levels** (PostgreSQL docs): read uncommitted → read committed → repeatable read → serializable; dirty read, nonrepeatable read, phantom read, serialization anomaly matrix. PostgreSQL implements 3 distinct levels internally. Relevant to IDFS transaction semantics.
+- **Two-phase locking** (CMU 15-445): centralized lock manager; locks vs latches (locks protect data values, latches protect internal structures); dynamically generates serializable schedule. Relevant to IDFS concurrency control.
+- **B+ tree implementation** (PostgreSQL): multi-level tree, metapage, leaf pages doubly-linked, internal pages point down, page splits on overflow, >99% pages are leaf pages. Relevant to IDFS index structure if B-tree chosen.
+
+**Distributed snapshots & quorum:**
+- **Chandy-Lamport distributed snapshot** (ACM TOPS 1985): process determines global state during computation; stable property detection (deadlock, termination, token disappearance); marker messages; used for checkpointing. Relevant to IDFS global state capture and recovery.
+- **Read-write quorum systems** (arxiv 2104.04102, Quoracle): read quorum and write quorum must intersect; tool quantifies trade-offs between quorum systems; ensures all previous writes observed by subsequent reads. Directly relevant to IDFS NWR quorum design.
+
+**Clock synchronization:**
+- **NTP v4** (RFC 5905): clock select routine, intersection interval, majority clique of truechimers using Byzantine agreement principles (Marzullo); selection + cluster algorithms. Relevant to HX-241/IDFS time sync options.
+- **PTP / IEEE 1588** (ntp.org): sub-microsecond precision for industrial networks; dedicated Ethernet LAN; timestamp capture; different from NTP in accuracy and hardware. Relevant to HX-241 carrier timing if needed.
+- **TrueTime** (Google Cloud Blog, Spanner): `TT.now()` returns `[earliest, latest]` interval; time servers with GPS clocks + atomic clocks; bounded clock uncertainty; commit wait for external consistency. Relevant to IDFS timestamping if physical time needed.
+
+**Leases & fencing:**
+- **Lease spec** (Apache River): time-bounded access to resource; renewal; lease holder + grantor; lease associated with mutually agreed time interval. Relevant to HX-241 session lease and IDFS lock timeout.
+- **Fencing / split-brain prevention** (Atlas of Engineering): prevents stale/failed/partitioned authority from continuing after takeover; revoke storage access, disable outputs, remove credentials, invalidate lease, enforce newer token; fencing claim credible only when rejected side proven unable to act. Directly relevant to HX-241/IDFS leader failover safety.
+
+**Post-quantum & hybrid cryptography:**
+- **RFC 10024** (PQ/T hybrid key agreement for TLS 1.3): X25519MLKEM768, SecP256r1MLKEM768, SecP384r1MLKEM1024 — combines ML-KEM with ECDHE; hybrid classical + post-quantum key exchange. Directly relevant to HX-241 key establishment migration path.
+
+**ZKP, MPC, HE libraries:**
+- **Circom** (docs): Rust compiler for ZK circuits; outputs constraints; circomlib with hundreds of templates (comparators, hash functions, signatures, binary/decimal convertors). Relevant to XarnX privacy layer.
+- **MP-SPDZ** (GitHub data61): versatile MPC framework; protocols for malicious/covert/semi-honest, dishonest/honest majority; MASCOT, LowGear, HighGear, SPDZ2k, Shamir, Rep3, garbled circuits (Yao, BMR). Relevant to XarnX secure computation.
+- **Microsoft SEAL** (GitHub): homomorphic encryption library; MIT license; BFV, BGV, CKKS schemes; critical security updates. Relevant to XarnX encrypted computation.
+
+**Hardware trust:**
+- **PUF primer** (OSTI): physical unclonable functions; manufacturing variations; SRAM PUF, ring oscillator PUF; challenge-response authentication; open research problems. Relevant to XPOCK hardware identity.
+- **TPM 2.0** (TCG Part 1 Architecture): PCR registers, attestation, log of security-affecting events, root of trust. Relevant to XPOCK secure key storage.
+
+**CRDT implementations:**
+- **CRDT code** (crdt.tech): Automerge (JSON data model, Rust + WASM), Yjs (near real-time peer-to-peer shared editing); general-purpose CRDT libraries for collaborative apps and replicated storage. Relevant to IDFS conflict-free replicated state.
+
+**Side-channel countermeasures:**
+- **AMD side-channel guidance**: constant-time operation, avoid secret-dependent control flow, consistent memory read/write patterns, masking sensitive data. Relevant to HX-241/IDFS constant-time crypto implementation.
+
 ---
 
 ## Research Completion Statement
 
-**~690 searches across 23 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 23 rounds of 30 searches each (~690 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~720 searches across 24 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 24 rounds of 30 searches each (~720 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
