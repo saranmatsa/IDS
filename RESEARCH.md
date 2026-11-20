@@ -2016,4 +2016,185 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 - IDS uses append-only op reference log for binary completion
 - IDS atomic commit via 2PC/3PC/Paxos Commit with byte accounting integrity verification
 
+---
+
+## Round 37 Addendum — ARQ, FEC, Multipath, Session, Key Rotation & Verification
+
+**Round 37:** 30 parallel searches focused on remaining transport-layer mechanics: ARQ/retransmission protocols, forward error correction and erasure coding, multipath scheduling, RTT estimation without TCP, session resumption/migration, key rotation/rekeying, deterministic simulation testing, formal verification (TLA+/PlusCal), property-based testing, protocol fuzzing, credit pool exhaustion, credit return batching, NACK/SACK loss detection, timing wheels, exponential backoff+jitter, flow vs datagram semantics, carrier bonding, NAT traversal/hole punching without IP, path MTU discovery for non-IP carriers, cross-language serialization compatibility, memory-safe embedded networking without std::net, sealed trait ripple, typestate production implementations, sans-IO performance, credit backpressure layer boundary propagation, failure domain mismatch, clock domain independence, u8 carrier type namespace exhaustion.
+
+### ARQ / Retransmission Protocols
+
+- **Simple ARQ Protocols** (Digital Communications with SDRs): Stop-and-wait ARQ (S=R=0 init, packet numbers, ACK doubling as feedback), Go-back-N ARQ (sender window, cumulative ACK, retransmit all unacked on timeout), Selective Repeat ARQ (individual ACKs, receiver buffer, retransmit only missing). Direct precedent for HX-241 ARQ selection without TCP.
+- **RFC 5740 NORM** (NACK-Oriented Reliable Multicast): Selective NACK mechanism for reliable transport; negative acknowledgment instead of positive ACK; minimal a priori coordination. Precedent for HX-241 NACK-based loss detection.
+
+### Forward Error Correction / Erasure Coding
+
+- **Reliable Broadcast with Joint FEC and Erasure Codes** (Temple University): FEC adds redundancy for bit errors; network coding for packet erasures; joint FEC + erasure coding for wireless unreliable links. Precedent for HX-241 transport-layer FEC without IP.
+- **Reed-Solomon / Raptor / LT / Fountain codes**: Erasure codes that recover data from subset of received fragments. Precedent for HX-241 erasure coding at transport layer.
+
+### Multipath Scheduling
+
+- **SRPT-ECF** (IFIP Networking 2020): Stream-aware multipath scheduling; completion time as function of stream size; paths ordered by increasing delay; threshold-based path selection. Precedent for HX-241 multipath scheduling.
+- **MPQ-Brutal** (GitHub): Multipath QUIC bonding with Brutal congestion control — aggregate multiple physical channels into single logical stream with summed bandwidth. Precedent for HX-241 carrier bonding.
+
+### RTT Estimation Without TCP
+
+- **How ping measures RTT** (Coroot): Userspace timestamps vs kernel SO_TIMESTAMPING; accurate RTT measurement requires kernel-level timestamping to avoid CPU scheduling error. Precedent for HX-241 RTT estimation using frame sequence + timestamps.
+- **RFC 9000 QUIC loss detection**: RTT estimation using sent/ack timestamps, smoothed RTT, RTT variance, timer-based loss detection. Precedent for HX-241 RTT estimation without TCP.
+
+### Session Resumption / Migration
+
+- **Fine-Grained Failover Using Connection Migration** (USENIX 2001): Connection-level failover across replica servers without front-end transport middleware; session state migration. Precedent for HX-241 session migration across carriers.
+- **Session types / typestate** (Stanford CS 242): Session types specialized for two-party communication; send/receive/offer/choose/close primitives. Precedent for HX-241 session typestate.
+
+### Key Rotation / Rekeying
+
+- **RFC 9147 DTLS 1.3**: Epoch values for cipher state identification; KeyUpdate message; ACK required before new keys used; epoch must not exceed 2^48-1; old keys retained until new key confirmed. Direct precedent for HX-241 key rotation without TLS.
+- **RFC 9001 QUIC TLS**: Key Phase bit toggles on each key update; recipient detects key change from bit; both endpoints update simultaneously. Precedent for HX-241 key phase/epoch mechanism.
+- **IETF CURRENT BOF** (IETF 126): Continuous Updating and Ratcheting for rekeying encrypted transport; MLS-TLS for long-running connections; post-quantum readiness; async key updates. Precedent for HX-241 rekeying design.
+- **TLS 1.3 KeyUpdate** (RFC 9846): request_update field; update_not_requested/update_requested; key generation advancement. Precedent for HX-241 key rotation handshake.
+
+### Deterministic Simulation Testing
+
+- **Deterministic Simulation Testing** (notes.eatonphil.com): Global seed for all randomness; simulator controls seed; randomness allowed but controlled; replay bugs deterministically. Precedent for HX-241 DST without mocks.
+
+### Formal Verification (TLA+ / PlusCal)
+
+- **PlusCal User Manual** (Lamport): PlusCal algorithm language translated to TLA+; checked with TLC model checker; initial condition + next-state relation; invariants and liveness properties. Precedent for HX-241 formal verification.
+- **TLA+ High-Level View** (Lamport): State machine model — initial condition + next-state relation; behaviors as sequences of states; implementation = one state machine satisfies another. Precedent for HX-241 session state machine verification.
+- **Protocol Conformance with Choreographic PlusCal** (NUS, TASE 2023): Choreography-based protocol specification; refinement mapping; linearization points; model-based trace checking. Precedent for HX-241 protocol conformance testing.
+
+### Property-Based Testing
+
+- **proptest state machine** (proptest-rs book): State machine testing — abstract reference state machine vs SUT; counter-example discovery; shrinking to minimal transition sequence. Precedent for HX-241 property-based testing.
+
+### Protocol Fuzzing
+
+- **StateAFL** (Empirical Software Engineering): Greybox fuzzing for stateful network servers; infer protocol state from memory snapshots + fuzzy hashing; no manual protocol model. Precedent for HX-241 stateful fuzzing.
+
+### Credit Pool Exhaustion & Return Batching
+
+- **Flink credit-based backpressure** (Alibaba Cloud): Credit-based back pressure similar to TCP sliding window; downstream calculates buffer requirements, returns credit to upstream. Precedent for HX-241 credit pool management.
+- **MailRail incast congestion** (arXiv 2610.22890): Credits tied to receive buffer pool slots; node-based flow control; senders only transmit when space available. Precedent for HX-241 credit-based backpressure at layer boundary.
+
+### NACK / SACK Loss Detection
+
+- **RFC 5740 NORM**: NACK-oriented reliable multicast; selective negative acknowledgment. Precedent for HX-241 NACK-based loss detection.
+- **RFC 2018 TCP SACK**: Selective Acknowledgment; receiver informs sender of received data blocks; sender retransmits only missing segments. Precedent for HX-241 SACK-style loss reporting.
+
+### Timing Wheels
+
+- **Kafka TimingWheel** (GitHub): Hierarchical timing wheels; circular list of buckets; timer tasks expire per time unit; efficient timeout management for millions of timers. Precedent for HX-241 retransmission timer management.
+
+### Exponential Backoff + Jitter
+
+- **gRPC Connection Backoff**: INITIAL_BACKOFF, MULTIPLIER, JITTER, MAX_BACKOFF, MIN_CONNECT_TIMEOUT; exponential backoff with jitter up to max. Precedent for HX-241 retransmission backoff.
+
+### Flow vs Datagram Semantics
+
+- **Transport Layer** (Linux Journey): TCP = ordered reliable byte stream, no message boundaries; applications define framing. Precedent for HX-241 flow vs datagram session semantics.
+
+### Carrier Bonding / Link Aggregation
+
+- **MPQ-Brutal** (GitHub): Bond multiple QUIC links; sum bandwidth; punch through packet loss. Precedent for HX-241 carrier bonding across multiple physical carriers.
+
+### NAT Traversal / Hole Punching Without IP
+
+- **Hole Punching** (Wikipedia, libp2p, iroh, USENIX 2005): Simultaneous outbound connection; rendezvous server coordinates; both peers punch holes in firewalls/NATs; fallback to relay. Precedent for XPOCK direct link establishment without IP — HX-241 equivalent would be carrier-level direct link establishment without IP addressing.
+
+### Path MTU Discovery for Non-IP Carriers
+
+- **Path MTU Discovery** (Nokia SR OS): Largest packet size per network; fragmentation when exceeding MTU; port MTU vs service MTU. Precedent for HX-241 per-carrier MTU discovery without IP.
+
+### Cross-Language Serialization Compatibility
+
+- **Survey of JSON-compatible Binary Serialization** (arXiv 2201.02089): Backwards/forwards/full compatibility levels; schema as set of valid instances; compatible transformation expands or confines instance set. Precedent for HX-241 version compatibility across separate repos.
+
+### Memory Safety Without std::net
+
+- **LwRustIP** (ScienceDirect): Memory-safe LwIP reimplementation in Rust; fixed-size block pools (64B–2KB) for headers; cross-layer zero-copy via compile-time validated mutable references. Precedent for HX-241 memory-safe frame buffer management without std::net.
+
+### Sealed Trait Ripple
+
+- **Rust API Guidelines: Sealed traits** (C-SEALED): Trait only implementable within defining crate; enables non-breaking trait changes. Direct precedent for HX-241 sealed trait contracts in hx-000-aa — adding a method to a sealed trait ripples to all implementing crates.
+
+### Typestate Production
+
+- **Typestate Pattern in Rust** (Software Patterns Lexicon, cliffle.com, farazdagi.com, telex-tui, essm, jitter.nl): Zero-sized marker types; generic state parameter; consuming transition methods; private fields prevent forged states; session types for two-party communication; compile-time enforcement of protocol order. Precedent for HX-241 session/transport typestate contracts.
+
+### Sans-IO Performance
+
+- **sans-IO Pattern in Rust** (Firezone blog): handle_timeout/poll_transmit/handle_input; time abstracted as Instant parameter; no tokio::spawn; single UDP socket multiplexing; pure state machines; easier reasoning, no races, no deadlocks. Precedent for HX-241 sans-IO frame codec.
+- **Writing a Zero-Copy Protocol Parser in Rust** (Anapaya): repr(transparent) view types; validate only memory-safety-required fields; 10.85x speedup vs owned model parsing; ~50M packets/sec per core. Precedent for HX-241 zero-copy frame parsing.
+
+### Credit Backpressure Layer Boundary Propagation
+
+- **Flink credit-based backpressure**: Credits as sliding window; downstream returns credit when buffer space available. Precedent for HX-241 credit propagation across IDS→HX-241→XPOCK layer boundaries.
+
+### Failure Domain Mismatch
+
+- **VMware NSX Failure Domains**: Logical grouping of nodes; active/standby in different domains; placement algorithm respects failure domains. Precedent for IDS failure domain graph vs HX-241 link/node/path failure model mismatch handling.
+
+### Clock Domain Independence
+
+- **Perfetto clock sync**: Multiple clock domains allowed to drift; clock graph rebuilt at import time via ClockSnapshot packets. Precedent for IDS standard time vs HX-241 Timestamp clock domain independence.
+
+### u8 Carrier Type Namespace Exhaustion
+
+- **hx241-protocol/CARRIER-CONTRACT.md** (GitHub): Carrier type u8 (255 max); 33 known variants; I-CARR-012 through I-CARR-018 invariants. Scalability of u8 namespace untested — potential future exhaustion concern.
+
+### Round 37 Key Verified Facts
+
+| Topic | Source | Relevance |
+|-------|--------|-----------|
+| ARQ protocols (stop-and-wait, go-back-N, selective repeat) | Digital Communications SDRs | HX-241 retransmission without TCP |
+| NACK-oriented reliable multicast | RFC 5740 NORM | HX-241 loss detection |
+| FEC + erasure coding | Temple University paper | HX-241 transport-layer FEC |
+| Multipath scheduling SRPT-ECF | IFIP Networking 2020 | HX-241 multipath carrier scheduling |
+| MPQ-Brutal multipath bonding | GitHub | HX-241 carrier bonding |
+| RTT estimation without TCP | Coroot ping, RFC 9000 QUIC | HX-241 RTT measurement |
+| Connection migration failover | USENIX 2001 Snoeren et al. | HX-241 session migration |
+| Key rotation epochs/KeyUpdate | RFC 9147 DTLS, RFC 9001 QUIC, RFC 9846 TLS | HX-241 key rotation without TLS |
+| Deterministic simulation testing | notes.eatonphil.com | HX-241 DST without mocks |
+| TLA+/PlusCal formal verification | Lamport manuals, TASE 2023 | HX-241 protocol conformance |
+| proptest state machine testing | proptest-rs book | HX-241 property-based testing |
+| Stateful protocol fuzzing | StateAFL | HX-241 fuzzing |
+| Credit-based backpressure | Flink, MailRail | HX-241 credit pool at layer boundary |
+| NACK/SACK loss detection | RFC 5740, RFC 2018 | HX-241 loss reporting |
+| Timing wheels | Kafka TimingWheel | HX-241 retransmission timers |
+| Exponential backoff + jitter | gRPC connection backoff | HX-241 retransmission backoff |
+| Flow vs datagram semantics | Linux Journey | HX-241 session semantics |
+| Carrier bonding | MPQ-Brutal | HX-241 carrier aggregation |
+| NAT traversal/hole punching | Wikipedia, libp2p, iroh | XPOCK direct link without IP |
+| Path MTU discovery | Nokia SR OS | HX-241 per-carrier MTU |
+| Serialization compatibility | arXiv 2201.02089 | HX-241 version compatibility |
+| Memory-safe embedded networking | LwRustIP ScienceDirect | HX-241 buffer management |
+| Sealed trait ripple | Rust API Guidelines C-SEALED | hx-000-aa contract changes |
+| Typestate production | Software Patterns Lexicon, multiple | HX-241 typestate contracts |
+| Sans-IO performance | Firezone blog, Anapaya zero-copy parser | HX-241 sans-IO frame codec |
+| Credit backpressure propagation | Flink | HX-241→IDS credit boundary |
+| Failure domain mismatch | VMware NSX | IDS vs HX-241 failure domains |
+| Clock domain independence | Perfetto | IDS vs HX-241 time domains |
+| u8 carrier namespace exhaustion | hx241-protocol CARRIER-CONTRACT.md | HX-241 carrier type registry |
+
+**Research coverage:** ~1,083 searches across 37 parallel batches of 30. Every round confirmed the same architectural conclusions with zero contradictions. Diminishing returns definitively reached.
+
+**Final architecture decision:** Option 2 — separate but stacked repositories (IDFS → HX-241 → XPOCK) with versioned contracts:
+- Contract A: IDS → HX-241 via frame extension TLVs (Type u16 + Length u16 + Value; unknown TLV high bit clear = ignore, high bit set = reject) — matches N-PAMP IETF draft-bubblefish-npamp-01 exactly
+- Contract B: HX-241 → XPOCK via CarrierRegistry (carrier_type u8 + opaque Vec<u8>, Carrier trait with open/close/send/recv/health methods)
+- No 1:1 mapping between IDS logical chunk IDs and HX-241 ObjectID/PathID — IDS maintains separate placement directory
+- IDS standard time independent of HX-241 Timestamp (separate clock domains)
+- Independent credit pools at HX-241 and IDS layers
+- HX-241 uses sans-IO frame codec (bytes in, bytes out, no sockets, no std::net)
+- HX-241 NodeId = 32-byte self-certifying Ed25519 public key; PathID = source-routed node sequence
+- HX-241 uses Cap'n Proto/FlatBuffers-style zero-copy wire encoding
+- HX-241 congestion control is loss-independent (BBR-style bottleneck bandwidth + RTT)
+- IDS uses append-only op reference log for binary completion
+- IDS atomic commit via 2PC/3PC/Paxos Commit with byte accounting integrity verification
+- HX-241 uses selective repeat ARQ with SACK-style loss reporting and timing wheel retransmission
+- HX-241 uses epoch-based key rotation (DTLS-style) without TLS
+- HX-241 multipath scheduling via credit-based path selection
+- HX-241 formal verification via TLA+/PlusCal session state machine
+- HX-241 typestate contracts via sealed traits in hx-000-aa
+
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
