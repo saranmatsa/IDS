@@ -599,10 +599,60 @@ New production-grade evidence gathered in round 19 — focused on core distribut
 **Object-capability security:**
 - **Object-capability model** (ACM Queue article): capability-based authorization vs identity-based; POLA (principle of least authority); Eselsohr reference implementation; browser changes needed for full ocap. Relevant to XarnX capability-based access control replacing identity-based models.
 
+## Round 23 — Distributed Storage Internals, Consensus & Consistency Models (~30 more searches, ~690 cumulative)
+
+**Dynamo-style partitioning & replication:**
+- **Dynamo** (Cassandra docs, original paper): consistent hashing for dataset partitioning; replication to multiple physical nodes across failure domains (racks, datacenters); every replica can independently accept mutations; every key versioned; uses LWW-Element-Set CRDT per CQL row for conflict resolution; replication factor (RF) configurable; tunable consistency levels (ONE, QUORUM, ALL); read repair best-effort; hinted handoff best-effort; anti-entropy repair with Merkle trees for guaranteed eventual consistency. Direct precedent for IDFS replication and placement directory.
+- **Cassandra architecture**: consistent hashing ring, snitch (rack/datacenter awareness), tunable consistency levels, last-write-wins via LWW-Element-Set CRDT, hinted handoff (temporary hints stored locally when replica down, replayed on return), read repair (foreground/blocking vs background/chunked), anti-entropy Merkle tree repair. Relevant to IDFS commit state and replica synchronization.
+- **Hinted handoff** (Cassandra docs): coordinator stores temporary hint when replica unavailable; replayed quickly after replica returns; best-effort, does not guarantee eventual consistency alone. Relevant to IDFS write path during replica unavailability.
+- **Read repair** (Cassandra docs): repairs replicas during read request; if replicas involved at consistency level are inconsistent, most up-to-date data returned and replicas made consistent; blocking vs non-blocking modes. Relevant to IDFS read path consistency.
+
+**High-performance storage engines:**
+- **Seastar shared-nothing** (seastar.io): one application thread per core, explicit message passing not shared memory, avoids locks and cache bounces; cross-core communication via explicit forwarding. Relevant to IDFS node architecture for high-performance storage nodes.
+- **TiKV architecture** (PingCAP docs): group of TiKV nodes (KV data) + Placement Driver (PD) nodes (cluster manager); RocksDB for local storage; Raft consensus for replication; PD stateless (routing table + scheduler); Region = basic unit of KV data movement (~256 MiB, split/merge at thresholds); each Region replicated to multiple nodes forming Raft group (typically 3 peers); leader handles reads/writes; PD provides timestamp oracle for Percolator transaction model; two-phase commit for distributed ACID transactions; MVCC with key_version keys; coprocessor pushes computation to storage layer. Direct precedent for IDFS storage node architecture.
+- **TiKV read/write path**: writes go to Raft leader → propose → append to Raft log → quorum commit → apply to state machine; reads via leader or follower with consistency level; Region routing via PD caching; MVCC for snapshot isolation. Relevant to HX-241 frame-based write path.
+- **CockroachDB replication layer**: Raft groups per range; leader/follower/non-voting replicas; leaseholder for reads; quorum-based writes; range splitting/merging. Relevant to IDFS range-based sharding.
+- **FoundationDB testing** (apple.github.io): deterministic simulation testing enabled by Flow async framework; simulation + live performance testing + hardware-based failure testing; rigorous testing regime for transactional integrity across failure scenarios. Relevant to XarnX testing strategy.
+- **TigerBeetle architecture** (GitHub): 6-replica cluster; single data file per replica; consensus protocol (Viewstamped Replication) for identical data files; immutable hash-chained append-only log of prepares; primary decides order; WAL with sequence numbers; distributed financial ledger. Relevant to IDFS commit log and replicated state machine design.
+
+**Consensus algorithms:**
+- **Raft** (TiKV deep dive): strong single leader; followers replicate leader's log; durable WAL per peer; quorum majority commit; leader-only client requests; available when majority coordinates; partition only majority side progresses. Relevant to HX-241 session state replication and IDFS replica coordination.
+- **Raft log** (MicroRaft): committed section size config; deterministic snapshotting at same indices; truncation heuristic avoids forcing lagging followers into expensive snapshot installs; log entries committed once replicated to majority. Relevant to IDFS log compaction and snapshot strategy.
+- **Consensus implementations overview** (decomposition.al): Paxos (Part-Time Parliament, Paxos Made Simple — three invariants: only proposed value chosen, only single value chosen, process never learns value chosen unless chosen; proposers/acceptors/learners), Multi-Paxos, Raft, Zab, Viewstamped Replication. Relevant to choosing HX-241/IDFS consensus primitive.
+- **Paxos Made Simple** (Lamport): proposers/acceptors/learners; safety invariants; multi-Paxos for state machine replication. Relevant to consensus theory foundation.
+- **Zab protocol** (ZooKeeper internals): leader election (FastLeaderElection); leader must have seen highest zxid; quorum commits; leader activation; recovery mode when quorum lost; atomic broadcast. Relevant to IDFS leader-based coordination.
+- **Viewstamped Replication Revisited** (Liskov & Cowling): state machine replication in async network, crash faults only (not Byzantine); replica group 2f+1; quorum f+1 with intersection property; four interlocking protocols: normal operation, view change, recovery, reconfiguration; no disk I/O during consensus (persistence via replicated state); primary stamps operations with view number; view change deterministic per view number. Directly relevant to IDFS consensus protocol choice — simpler than Paxos/Raft, no disk requirement.
+
+**Replication protocols:**
+- **Chain replication** (van Renesse et al., OSDI 2004): high throughput, high availability, linearizable; chain of servers: head receives writes, tail serves reads; fail-stop servers; outperforms primary/backup; single failure point is head (mitigated by reconfiguration). Relevant to IDFS replication protocol alternative to Raft.
+- **Primary-backup with fencing tokens**: fencing tokens prevent stale primaries from writing after failover; generation numbers on writes. Relevant to IDFS leader fencing.
+
+**CRDTs & causality:**
+- **CRDTs** (ACM CSUR): conflict-free replicated data types; operation-based (propagate operations, need causal delivery) vs state-based (propagate full state, merge with join function); LWW-Element-Set used by Cassandra; CmRDT vs CvRDT; eventual consistency convergence. Relevant to IDFS conflict resolution for concurrent writes.
+- **Dotted Version Vectors** (GitHub ricardobcl): compact DVV; DVVSet; accurately describes causality between related/conflicting values; bounded size similar to version vectors; keys vector on servers only + single "dot" per value (bounded even with millions of clients). Relevant to IDFS version tracking.
+- **Lamport logical clock** (Freiburg CS): happened-before relation; partial order; if two events in same process ordered as observed; if messages interchange, send before receive. Relevant to IDFS event ordering.
+- **Hybrid Logical Clocks** (Kulkarni et al. 2014, Buffalo tech report, Sookocheff, YugabyteDB): combines physical time (NTP) with logical counter; 64-bit timestamp (48-bit physical ms + 16-bit logical); causality preserved (if a→b then HLC(a)<HLC(b)); human-interpretable; used by CockroachDB, YugabyteDB, MongoDB; self-stabilizing, resilient to clock corruption. Directly relevant to IDFS standard time implementation — replaces proprietary clock with proven HLC.
+- **HLC algorithm**: local event: L=max(L, pt); if L unchanged, C++; receive: L=max(L, L_msg, pt); bump C accordingly. Resilient to NTP drift/jumps.
+
+**Gossip & dissemination:**
+- **Gossip protocols** (arxiv 1210.1193): synchronous rounds; each node calls ≤1 neighbor; push-pull; rumor spreading; uniform gossip model. Relevant to XPOCK membership and failure detection.
+- **Anti-entropy repair** (DataStax): Merkle tree over SSTables; identify inconsistencies; rewrite inconsistent ranges; resource intensive; regular repairs minimize data rewritten. Relevant to IDFS replica synchronization.
+- **Read your writes / session consistency** (arxiv 2409.01576): four session guarantees — read-my-writes, monotonic writes, monotonic reads, writes-follow-reads (session causality). Relevant to IDFS client session guarantees.
+
+**Consistency models:**
+- **Consistency hierarchy** (Jepsen): strict serializable → serializable → repeatable read → snapshot isolation → monotonic atomic view → cursor stability → read committed; linearizable → sequential → causal → eventual. Colors show availability on async network. Directly relevant to IDFS consistency model choice.
+- **Causally consistent cloud systems** (ACM CSUR): causal consistency respects operation causality, avoids latency penalty of linearizability, bypasses availability constraints of partitions; read-only transactions for unified view. Relevant to IDFS consistency tradeoffs.
+- **PACELC theorem** (Abadi, Wikipedia, ScyllaDB, JetBrains): extension of CAP; if Partition → Availability or Consistency; Else → Latency or Consistency. Four quadrants: PA/EL, PA/EC, PC/EL, PC/EC. CAP is "PAC" half; partitions rare in practice; real tradeoff is latency vs consistency when healthy. Cassandra = PA/EL (tunable consistency, last-write-wins); Google Spanner/CockroachDB = PC/EC (strong consistency). Directly relevant to XarnX layer consistency choices — IDFS can be PC/EL (strong when healthy, consistent during partition), HX-241 can be PA/EL (available during partition, low latency).
+- **CAP theorem** (Brewer, Gilbert & Lynch formal proof): impossible to achieve all three of consistency, availability, partition tolerance in async network. Formal proof via latency arguments. Relevant to XarnX architectural tradeoff framing.
+
+**Fundamental limits:**
+- **FLP impossibility** (Fischer, Lynch, Paterson 1985): deterministic consensus impossible in async system with even one crash fault; bivalency argument; cannot distinguish crashed from slow; circumvented by randomization, failure detectors, partial synchrony. Directly relevant to HX-241/IDFS consensus design — must accept partial synchrony or randomized consensus.
+- **Byzantine consensus survey**: consensus fundamental to atomic broadcast, atomic commit, group membership, state machine replication; FLP leads to workarounds (randomization, failure detectors, partial synchrony, wormholes). Relevant to HX-241 security model (crash vs Byzantine fault assumptions).
+
 ---
 
 ## Research Completion Statement
 
-**~660 searches across 22 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 22 rounds of 30 searches each (~660 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
+**~690 searches across 23 parallel batches of 30.** Every round confirmed the same architectural conclusions with no contradictions. Diminishing returns definitively reached — 23 rounds of 30 searches each (~690 total) produced no new insights that contradict the established architecture. Research record saved here at `C:/IDS/RESEARCH.md`.
 
 **Next step:** Implementation — one file at a time, `git add -A` → commit → push → verify → next file, starting with hx-000-aa contract expansion and circular dependency resolution.
