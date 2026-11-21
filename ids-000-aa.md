@@ -1307,9 +1307,7 @@ Then next file. Never batch. Never skip push. Never skip verification.
 
 ---
 
-## 12. Phase 36 — QR/OOB Bootstrap Implementation Prompt (IDS-Adapted)
-
-### Phase 36 Instructions
+## 12. Phase 36 — Implementation Prompt
 
 Read `rulebook.md` in the repository root completely. Then read Phase 36 from `plan.md` and identify its exact requirements, prescribed file order, dependencies, and acceptance criteria. Read only the additional files necessary to implement Phase 36. Create any missing directories. Report the ordered implementation file list and briefly state the implementation approach. Then immediately begin implementing Phase 36, following every rule in `rulebook.md`.
 
