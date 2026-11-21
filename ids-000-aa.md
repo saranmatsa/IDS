@@ -1305,4 +1305,26 @@ Then next file. Never batch. Never skip push. Never skip verification.
 
 ---
 
+---
+
+## 12. Phase 36 — QR/OOB Bootstrap Implementation Prompt (IDS-Adapted)
+
+### Phase 36 Instructions
+
+Read `rulebook.md` in the repository root completely. Then read Phase 36 from `plan.md` and identify its exact requirements, prescribed file order, dependencies, and acceptance criteria. Read only the additional files necessary to implement Phase 36. Create any missing directories. Report the ordered implementation file list and briefly state the implementation approach. Then immediately begin implementing Phase 36, following every rule in `rulebook.md`.
+
+### Mandatory Rules — No Exceptions
+
+1. **One file at a time:** write → run `count_loc.sh` → verify 2400/1600/800 LOC targets → `git add -A` → `git commit -m "ids-000-aa: component — what changed — why"` → `git push origin main` → verify `git log --oneline -1` and `git status` show clean state → only then next file. Never batch files. Never skip push. Never skip verification.
+
+2. **File rewrites:** When rewriting an existing file, always `rm` it first, then `write_file` from scratch. Never use `patch` on files with escaped Rust string literals. Use `patch` only for small, simple targeted edits on clean files.
+
+3. **LOC verification:** Run `C:\IDS\count_loc.sh <file>` after writing every substantive file and before committing it. If targets aren't met, patch in more production code (old_string/new_string). Never estimate LOC manually or claim compliance without running the script.
+
+4. **Stop on errors:** If any write, lint, commit, or push fails, stop and report it. Do not continue until resolved.
+
+5. **Execute autonomously:** Do not wait for prompts between files. After each file is committed, pushed, and verified clean, immediately proceed to the next file in the ordered list.
+
+Continue until Phase 36 is fully implemented, tested, committed, pushed, and verified, or a genuine blocker prevents further progress. Do not stop at planning. Do not skip files. Do not claim unverified results.
+
 **End of PLAN.md for ids-000-aa.** This crate only — the central hub father crate. Edit here, ripple downstream, never touch thousands of files for a single contract change.
