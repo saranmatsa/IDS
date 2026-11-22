@@ -1307,11 +1307,9 @@ Then next file. Never batch. Never skip push. Never skip verification.
 
 ---
 
-## 12. Phase 36 — Implementation Prompt
 
-Read `rulebook.md` in the repository root completely. Then read Phase 36 from `plan.md` and identify its exact requirements, prescribed file order, dependencies, and acceptance criteria. Read only the additional files necessary to implement Phase 36. Create any missing directories. Report the ordered implementation file list and briefly state the implementation approach. Then immediately begin implementing Phase 36, following every rule in `rulebook.md`.
+Read `ids-000-aa.md` in the repository root completely. Read only the additional files necessary to implement ids-000-aa. Create any missing directories. Report the ordered implementation file list and briefly state the implementation approach. Then immediately begin implementing Phase 36, following every rule in `rulebook.md`.
 
-### Mandatory Rules — No Exceptions
 
 1. **One file at a time:** write → run `count_loc.sh` → verify 2400/1600/800 LOC targets → `git add -A` → `git commit -m "ids-000-aa: component — what changed — why"` → `git push origin main` → verify `git log --oneline -1` and `git status` show clean state → only then next file. Never batch files. Never skip push. Never skip verification.
 
