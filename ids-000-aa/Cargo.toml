@@ -8,6 +8,7 @@ license = "Proprietary"
 [dependencies]
 thiserror = "2.0"
 serde = { version = "1", features = ["derive"] }
+blake3 = "1.5"
 
 [lib]
 path = "src/lib.rs"
