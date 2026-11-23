@@ -1,0 +1,1508 @@
+# PROMPTS.txt — IDS Phase prompts (generated from CRATES.md)
+
+Format: <N>. Research only do not read plan.md **[Phase <NNN> — <description>]**
+Each entry includes crate-specific details from CRATES.md
+
+1. Research only do not read plan.md **[Phase 001 — Create the ids-000-aa crate: Canonical types, sealed trait contracts, invariants, versioning, error contracts]**
+
+Crate: ids-000-aa
+Purpose: Canonical types, sealed trait contracts, invariants, versioning, error contracts.
+Contents: - `src/lib.rs` — re-exports of types, contracts, invariants, errors, prelude
+- `src/types.rs` — `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `OpRef`, `OrderingPos`, `Endpoint`, `CarrierType`, `OpState`, `CommitState`, `PlacementDecision`, `RedundancyMode`, `ConsistencyProfile`, `FailureDomain`
+- `src/contracts/mod.rs` — declares all contract submodules
+- `src/contracts/carrier.rs` — `trait Carrier` (send/receive opaque datagrams, no IP/TCP/UDP)
+- `src/contracts/transp
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 001 — Create the ids-000-aa crate: Canonical types, sealed trait contracts, invariants, versioning, error contracts]**
+
+Create plan-001.md in C:/idfs/plans/ for the ids-000-aa crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+2. Research only do not read plan.md **[Phase 002 — Create the ids-carrier crate: Native carrier interface, no existing networking stack.]**
+
+Crate: ids-carrier
+Purpose: Native carrier interface, no existing networking stack.
+Contents: `Endpoint` (`CarrierType` + `Vec<u8>`), `Datagram`, `CarrierType` enum, `send_datagram`, `receive_datagram`, carrier capability negotiation, carrier health, carrier-agnostic addressing.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 002 — Create the ids-carrier crate: Native carrier interface, no existing networking stack.]**
+
+Create plan-002.md in C:/idfs/plans/ for the ids-carrier crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+3. Research only do not read plan.md **[Phase 003 — Create the ids-crypto crate: Only allowed crypto: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly130]**
+
+Crate: ids-crypto
+Purpose: Only allowed crypto: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+Contents: Key generation, signing, verification, symmetric encryption/decryption, hashing, key derivation, nonce management, key rotation, key revocation, constant-time comparisons.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 003 — Create the ids-crypto crate: Only allowed crypto: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly130]**
+
+Create plan-003.md in C:/idfs/plans/ for the ids-crypto crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+4. Research only do not read plan.md **[Phase 004 — Create the ids-identity crate: IDS-B identity separation — stable internal ID with periodically rotating networ]**
+
+Crate: ids-identity
+Purpose: IDS-B identity separation — stable internal ID with periodically rotating network-facing identifier.
+Contents: `StableNodeId`, `RotatingNodeId` (RNI), `RNI mapping table`, validity windows, transition states (scheduled/active/superseded/expired/revoked), authenticated resolution, idle-only rotation enforcement, emergency revocation.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 004 — Create the ids-identity crate: IDS-B identity separation — stable internal ID with periodically rotating networ]**
+
+Create plan-004.md in C:/idfs/plans/ for the ids-identity crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+5. Research only do not read plan.md **[Phase 005 — Create the ids-time crate: Proprietary time basis for ordering/commit, not wall-clock or HLC.]**
+
+Crate: ids-time
+Purpose: Proprietary time basis for ordering/commit, not wall-clock or HLC.
+Contents: `Idstime` type, tick source, drift tolerance, synchronization mechanism, cross-region reference frame, clock drift absorption, ordering timestamps, commit timestamps, durability windows.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 005 — Create the ids-time crate: Proprietary time basis for ordering/commit, not wall-clock or HLC.]**
+
+Create plan-005.md in C:/idfs/plans/ for the ids-time crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+6. Research only do not read plan.md **[Phase 006 — Create the ids-topology crate: CRUSH-style placement, failure domain modeling (power, facility, network, operat]**
+
+Crate: ids-topology
+Purpose: CRUSH-style placement, failure domain modeling (power, facility, network, operator, geographic).
+Contents: `FailureDomain` hierarchy, topology map, correlated failure modeling, placement constraints, domain independence verification, power-domain separation, network-segment separation, operator separation, jurisdiction separation.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 006 — Create the ids-topology crate: CRUSH-style placement, failure domain modeling (power, facility, network, operat]**
+
+Create plan-006.md in C:/idfs/plans/ for the ids-topology crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+7. Research only do not read plan.md **[Phase 007 — Create the ids-failure-detector crate: Chandra-Toueg failure detector properties — completeness and accuracy.]**
+
+Crate: ids-failure-detector
+Purpose: Chandra-Toueg failure detector properties — completeness and accuracy.
+Contents: SWIM gossip-based detection, phi accrual suspicion, strong/weak completeness, strong/weak accuracy, suspected vs proven failure, heartbeat loss vs GC pause, false positive/negative handling, detector oscillation.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 007 — Create the ids-failure-detector crate: Chandra-Toueg failure detector properties — completeness and accuracy.]**
+
+Create plan-007.md in C:/idfs/plans/ for the ids-failure-detector crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+8. Research only do not read plan.md **[Phase 008 — Create the ids-membership crate: Authenticated, versioned joins/leaves; coordinated with placement and ownership.]**
+
+Crate: ids-membership
+Purpose: Authenticated, versioned joins/leaves; coordinated with placement and ownership.
+Contents: Node states (candidate/validating/active/degraded/draining/failed/retired), H-unit membership, regional cluster membership, membership versioning, admission control, credential validation, capacity advertisement, health reporting, removal procedures.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 008 — Create the ids-membership crate: Authenticated, versioned joins/leaves; coordinated with placement and ownership.]**
+
+Create plan-008.md in C:/idfs/plans/ for the ids-membership crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+9. Research only do not read plan.md **[Phase 009 — Create the ids-placement crate: Where data lives; placement engine with hard constraints and soft objectives.]**
+
+Crate: ids-placement
+Purpose: Where data lives; placement engine with hard constraints and soft objectives.
+Contents: Placement strategies (hash, range, geographical, workload-aware, capacity-aware, hybrid), dynamic rebalancing, capacity tracking (storage, CPU, memory, network, IOPS), failure-domain-aware placement, recovery-cost-aware placement, hard constraint enforcement (residency, authorization, durability, capacity, data type, retention).
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 009 — Create the ids-placement crate: Where data lives; placement engine with hard constraints and soft objectives.]**
+
+Create plan-009.md in C:/idfs/plans/ for the ids-placement crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+10. Research only do not read plan.md **[Phase 010 — Create the ids-distribution crate: Dataset division into independently placeable units.]**
+
+Crate: ids-distribution
+Purpose: Dataset division into independently placeable units.
+Contents: Partition boundaries, key mapping, split/merge behavior, partition metadata, distribution across nodes/H-units/regions, partition ownership, logical-to-physical mapping stability during migration.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 010 — Create the ids-distribution crate: Dataset division into independently placeable units.]**
+
+Create plan-010.md in C:/idfs/plans/ for the ids-distribution crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+11. Research only do not read plan.md **[Phase 011 — Create the ids-discovery crate: Gossip-based membership discovery without central coordinator.]**
+
+Crate: ids-discovery
+Purpose: Gossip-based membership discovery without central coordinator.
+Contents: Rumor mongering, anti-entropy, aggregate gossip, epidemic broadcast, membership convergence, discovery propagation, discovery expiration/refresh, churn handling.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 011 — Create the ids-discovery crate: Gossip-based membership discovery without central coordinator.]**
+
+Create plan-011.md in C:/idfs/plans/ for the ids-discovery crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+12. Research only do not read plan.md **[Phase 012 — Create the ids-protocol crate: HX-241-style native frame format, self-defined, carrier-agnostic.]**
+
+Crate: ids-protocol
+Purpose: HX-241-style native frame format, self-defined, carrier-agnostic.
+Contents: Frame header, frame body, framing, sequencing, acknowledgements, fragmentation/reassembly, delivery semantics, stream/session semantics, flow control, loss detection, retransmission, protocol invariants.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 012 — Create the ids-protocol crate: HX-241-style native frame format, self-defined, carrier-agnostic.]**
+
+Create plan-012.md in C:/idfs/plans/ for the ids-protocol crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+13. Research only do not read plan.md **[Phase 013 — Create the ids-write crate: Write lifecycle: received → ordered → executing → committed → synchronized.]**
+
+Crate: ids-write
+Purpose: Write lifecycle: received → ordered → executing → committed → synchronized.
+Contents: WAL, append-only log, durable write path, write fan-out (up to ~30 databases simultaneously), idempotent writes, operation references, ordering positions, durability conditions, commit acknowledgements, write-order management, concurrent-write resolution.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 013 — Create the ids-write crate: Write lifecycle: received → ordered → executing → committed → synchronized.]**
+
+Create plan-013.md in C:/idfs/plans/ for the ids-write crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+14. Research only do not read plan.md **[Phase 014 — Create the ids-read crate: Distributed reads with replica-aware selection and fallback.]**
+
+Crate: ids-read
+Purpose: Distributed reads with replica-aware selection and fallback.
+Contents: Read lifecycle, closest-replica fallback, ordered-read visibility, replica freshness, consistency profile enforcement, parallel reads, scatter-gather reads, query aggregation, read repair, hinted handoff.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 014 — Create the ids-read crate: Distributed reads with replica-aware selection and fallback.]**
+
+Create plan-014.md in C:/idfs/plans/ for the ids-read crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+15. Research only do not read plan.md **[Phase 015 — Create the ids-query crate: Query decomposition across partitions, nodes, regions.]**
+
+Crate: ids-query
+Purpose: Query decomposition across partitions, nodes, regions.
+Contents: Query planner, targeted query execution, partition maps, indexes, predicates, ownership metadata, scatter-gather execution, distributed aggregation (count, sum, min, max, group, filter, sort), cross-regional queries, intermediate result combination.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 015 — Create the ids-query crate: Query decomposition across partitions, nodes, regions.]**
+
+Create plan-015.md in C:/idfs/plans/ for the ids-query crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+16. Research only do not read plan.md **[Phase 016 — Create the ids-routing crate: Data-aware request resolution, not network packet routing.]**
+
+Crate: ids-routing
+Purpose: Data-aware request resolution, not network packet routing.
+Contents: Request resolver, locality-aware routing (geography, health, load, freshness, capacity, ownership, consistency), replica-aware routing, near-to-far routing, adaptive routing, routing tables, path selection, loop prevention.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 016 — Create the ids-routing crate: Data-aware request resolution, not network packet routing.]**
+
+Create plan-016.md in C:/idfs/plans/ for the ids-routing crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+17. Research only do not read plan.md **[Phase 017 — Create the ids-replication crate: Change propagation, ordered/versioned streams, resumable delivery.]**
+
+Crate: ids-replication
+Purpose: Change propagation, ordered/versioned streams, resumable delivery.
+Contents: Independent replication, full replication, replication streams, acknowledgement tracking, replication lag observability, synchronization checkpoints, incremental synchronization, synchronization retries, bounded backoff, idempotent application.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 017 — Create the ids-replication crate: Change propagation, ordered/versioned streams, resumable delivery.]**
+
+Create plan-017.md in C:/idfs/plans/ for the ids-replication crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+18. Research only do not read plan.md **[Phase 018 — Create the ids-sync crate: Replica reconciliation and convergence.]**
+
+Crate: ids-sync
+Purpose: Replica reconciliation and convergence.
+Contents: Incremental change streams, checkpoint management, missing update detection, retry procedures, version tracking, Merkle tree comparison, anti-entropy repair, read repair, replica reconciliation, integrity verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 018 — Create the ids-sync crate: Replica reconciliation and convergence.]**
+
+Create plan-018.md in C:/idfs/plans/ for the ids-sync crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+19. Research only do not read plan.md **[Phase 019 — Create the ids-consistency crate: Explicit consistency contracts per dataset.]**
+
+Crate: ids-consistency
+Purpose: Explicit consistency contracts per dataset.
+Contents: Strong consistency, causal consistency, read-your-writes, bounded staleness, eventual consistency, consistency profiles table, committed-prefix tracking, operation-state tracking (received/ordered/executing/committed/synchronized/verified/failed), durability-aware acknowledgement.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 019 — Create the ids-consistency crate: Explicit consistency contracts per dataset.]**
+
+Create plan-019.md in C:/idfs/plans/ for the ids-consistency crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+20. Research only do not read plan.md **[Phase 020 — Create the ids-broadcast crate: Message ordering guarantees across replicas.]**
+
+Crate: ids-broadcast
+Purpose: Message ordering guarantees across replicas.
+Contents: Reliable broadcast, FIFO broadcast, causal broadcast, total order broadcast (atomic broadcast), FIFO-total order broadcast, state machine replication, uniform agreement, uniform integrity, validity, termination.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 020 — Create the ids-broadcast crate: Message ordering guarantees across replicas.]**
+
+Create plan-020.md in C:/idfs/plans/ for the ids-broadcast crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+21. Research only do not read plan.md **[Phase 021 — Create the ids-quorum crate: Quorum intersection for consistency.]**
+
+Crate: ids-quorum
+Purpose: Quorum intersection for consistency.
+Contents: Read quorum, write quorum, quorum intersection (r + w > n), majority quorums, Flexible Paxos quorum intersection, quorum capacity, quorum fault tolerance, read/write fault tolerance, quorum system optimization.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 021 — Create the ids-quorum crate: Quorum intersection for consistency.]**
+
+Create plan-021.md in C:/idfs/plans/ for the ids-quorum crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+22. Research only do not read plan.md **[Phase 022 — Create the ids-crdt crate: Optimistic replication with deterministic convergence.]**
+
+Crate: ids-crdt
+Purpose: Optimistic replication with deterministic convergence.
+Contents: Operation-based CRDTs, state-based CRDTs, delta-CRDTs, grow-only counter, grow-only set, two-phase set, last-writer-wins register, OR-set, PN-counter, operation-based vs state-based tradeoffs, merge commutativity/associativity/idempotency.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 022 — Create the ids-crdt crate: Optimistic replication with deterministic convergence.]**
+
+Create plan-022.md in C:/idfs/plans/ for the ids-crdt crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+23. Research only do not read plan.md **[Phase 023 — Create the ids-erasure crate: Reconstruction-based redundancy with storage efficiency.]**
+
+Crate: ids-erasure
+Purpose: Reconstruction-based redundancy with storage efficiency.
+Contents: Reed-Solomon (n,k) codes, systematic form, maximum distance separable (MDS), regenerating codes, locally recoverable codes (LRC), erasure-code reconstruction, decode latency, fragment placement across failure domains, partial parallel repair (PPR).
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 023 — Create the ids-erasure crate: Reconstruction-based redundancy with storage efficiency.]**
+
+Create plan-023.md in C:/idfs/plans/ for the ids-erasure crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+24. Research only do not read plan.md **[Phase 024 — Create the ids-lease crate: Time-bounded authority to prevent split-brain.]**
+
+Crate: ids-lease
+Purpose: Time-bounded authority to prevent split-brain.
+Contents: Lease grant, lease renewal, lease expiry, fencing token increment, fencing token checking, STONITH integration, leadership epoch, term-based authority, lease renewal during partition, premature leadership loss prevention.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 024 — Create the ids-lease crate: Time-bounded authority to prevent split-brain.]**
+
+Create plan-024.md in C:/idfs/plans/ for the ids-lease crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+25. Research only do not read plan.md **[Phase 025 — Create the ids-recovery crate: Node/H-unit/region/region-wide failure recovery.]**
+
+Crate: ids-recovery
+Purpose: Node/H-unit/region/region-wide failure recovery.
+Contents: Node failure recovery, H-unit failure compensation, cross-H-unit recovery, regional failure compensation, regional failure isolation, replica-based recovery, erasure-code reconstruction, capacity-bounded recovery, ownership-aware recovery, recovery verification, redundancy restoration, multi-level recovery state machine.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 025 — Create the ids-recovery crate: Node/H-unit/region/region-wide failure recovery.]**
+
+Create plan-025.md in C:/idfs/plans/ for the ids-recovery crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+26. Research only do not read plan.md **[Phase 026 — Create the ids-snapshot crate: Consistent global state for checkpointing and recovery.]**
+
+Crate: ids-snapshot
+Purpose: Consistent global state for checkpointing and recovery.
+Contents: Chandy-Lamport algorithm, marker messages, consistent global state, in-flight message recording, stable property detection, global snapshot, savepoint, checkpoint, incremental checkpoint, state restoration.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 026 — Create the ids-snapshot crate: Consistent global state for checkpointing and recovery.]**
+
+Create plan-026.md in C:/idfs/plans/ for the ids-snapshot crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+27. Research only do not read plan.md **[Phase 027 — Create the ids-fault crate: Failure isolation and graceful degradation.]**
+
+Crate: ids-fault
+Purpose: Failure isolation and graceful degradation.
+Contents: Circuit breaker states (closed/open/half-open), thresholds, backoff, per-node circuit breakers, global circuit breakers, handshake circuit breakers, bulkhead isolation, load shedding, backpressure, graceful degradation hierarchy, retry storms, thundering herd prevention.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 027 — Create the ids-fault crate: Failure isolation and graceful degradation.]**
+
+Create plan-027.md in C:/idfs/plans/ for the ids-fault crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+28. Research only do not read plan.md **[Phase 028 — Create the ids-byzantine crate: BFT consensus and authenticated broadcast for malicious nodes.]**
+
+Crate: ids-byzantine
+Purpose: BFT consensus and authenticated broadcast for malicious nodes.
+Contents: PBFT, HotStuff, Flexible BFT, Byzantine broadcast (Dolev-Strong), authenticated broadcast, Sybil resistance, eclipse resistance, malicious routing/discovery behavior, replay attacks, traffic manipulation, resource exhaustion, DoS resistance, Byzantine node isolation/quarantine.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 028 — Create the ids-byzantine crate: BFT consensus and authenticated broadcast for malicious nodes.]**
+
+Create plan-028.md in C:/idfs/plans/ for the ids-byzantine crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+29. Research only do not read plan.md **[Phase 029 — Create the ids-saga crate: Distributed transaction orchestration with rollback.]**
+
+Crate: ids-saga
+Purpose: Distributed transaction orchestration with rollback.
+Contents: Choreography-based saga, orchestration-based saga, local transactions, compensating transactions, saga state machine, retry semantics, idempotency, deadlock handling, livelock prevention, cross-domain transaction coordination.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 029 — Create the ids-saga crate: Distributed transaction orchestration with rollback.]**
+
+Create plan-029.md in C:/idfs/plans/ for the ids-saga crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+30. Research only do not read plan.md **[Phase 030 — Create the ids-integrity crate: Data integrity verification and bit rot detection.]**
+
+Crate: ids-integrity
+Purpose: Data integrity verification and bit rot detection.
+Contents: End-to-end checksums, content hashes, Merkle trees, version comparisons, replica audits, partition-level integrity verification, continuous integrity scrubbing, silent bit rot detection, checksum mismatch handling, ZFS-style end-to-end protection.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 030 — Create the ids-integrity crate: Data integrity verification and bit rot detection.]**
+
+Create plan-030.md in C:/idfs/plans/ for the ids-integrity crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+31. Research only do not read plan.md **[Phase 031 — Create the ids-security crate: Security across complete infrastructure.]**
+
+Crate: ids-security
+Purpose: Security across complete infrastructure.
+Contents: Identity management, authentication (mutual), authorization (dataset/operation/identity-level permissions), data encryption (in transit + at rest), key management (generation, rotation, revocation, distribution, recovery), regional security boundaries, auditability, tamper-evident audit records.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 031 — Create the ids-security crate: Security across complete infrastructure.]**
+
+Create plan-031.md in C:/idfs/plans/ for the ids-security crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+32. Research only do not read plan.md **[Phase 032 — Create the ids-resource crate: Resource tracking and workload protection.]**
+
+Crate: ids-resource
+Purpose: Resource tracking and workload protection.
+Contents: Storage/CPU/memory/network monitoring, latency/queue/utilization/health measurements, per-client/per-dataset/per-operator/per-region quotas, workload isolation, backpressure, resource reservations, committed capacity optimization, resource exhaustion prevention.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 032 — Create the ids-resource crate: Resource tracking and workload protection.]**
+
+Create plan-032.md in C:/idfs/plans/ for the ids-resource crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+33. Research only do not read plan.md **[Phase 033 — Create the ids-lifecycle crate: Dataset lifecycle: creation → active → archive → expiry → retention → legal hold]**
+
+Crate: ids-lifecycle
+Purpose: Dataset lifecycle: creation → active → archive → expiry → retention → legal hold → deletion → reclamation.
+Contents: Lifecycle policies, retention periods, legal holds, expiry, deletion coordination, reclamation, tombstone management, space amplification reduction, snapshot compatibility.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 033 — Create the ids-lifecycle crate: Dataset lifecycle: creation → active → archive → expiry → retention → legal hold]**
+
+Create plan-033.md in C:/idfs/plans/ for the ids-lifecycle crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+34. Research only do not read plan.md **[Phase 034 — Create the ids-compute crate: Analytics and transformations near data.]**
+
+Crate: ids-compute
+Purpose: Analytics and transformations near data.
+Contents: Compute placement, authorization constraints, resource quotas, data-use policy enforcement, result compaction (return compact results, not entire datasets), execution isolation, compute-to-data scheduling.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 034 — Create the ids-compute crate: Analytics and transformations near data.]**
+
+Create plan-034.md in C:/idfs/plans/ for the ids-compute crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+35. Research only do not read plan.md **[Phase 035 — Create the ids-federation crate: Infrastructure owned by independent parties.]**
+
+Crate: ids-federation
+Purpose: Infrastructure owned by independent parties.
+Contents: Federated infrastructure registry, multi-owner trust architecture, authenticated identities, scoped credentials, policy evaluation, revocation, verifiable participation records, domain admission, capability advertisements, trust roots, provenance.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 035 — Create the ids-federation crate: Infrastructure owned by independent parties.]**
+
+Create plan-035.md in C:/idfs/plans/ for the ids-federation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+36. Research only do not read plan.md **[Phase 036 — Create the ids-accounting crate: Measure contributed resources; quotas and commitments.]**
+
+Crate: ids-accounting
+Purpose: Measure contributed resources; quotas and commitments.
+Contents: Storage/bandwidth/compute/recovery effort measurement, quotas, reservations, commitments, negotiated resource allocations, infrastructure accounting, billing events, cost per byte, energy per byte.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 036 — Create the ids-accounting crate: Measure contributed resources; quotas and commitments.]**
+
+Create plan-036.md in C:/idfs/plans/ for the ids-accounting crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+37. Research only do not read plan.md **[Phase 037 — Create the ids-hotcold crate: Data movement among placement classes by access patterns.]**
+
+Crate: ids-hotcold
+Purpose: Data movement among placement classes by access patterns.
+Contents: Hot tier, warm tier, cold tier, promotion/demotion, access pattern tracking, latency objectives, cost optimization, lifecycle policy integration, logical identity preservation during tier movement, destination verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 037 — Create the ids-hotcold crate: Data movement among placement classes by access patterns.]**
+
+Create plan-037.md in C:/idfs/plans/ for the ids-hotcold crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+38. Research only do not read plan.md **[Phase 038 — Create the ids-mobility crate: Dataset/partition region changes with controlled handoff.]**
+
+Crate: ids-mobility
+Purpose: Dataset/partition region changes with controlled handoff.
+Contents: Preferred/authoritative region changes, logical identity preservation, history preservation, access policy preservation, controlled handoff between old/new owners, cutover verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 038 — Create the ids-mobility crate: Dataset/partition region changes with controlled handoff.]**
+
+Create plan-038.md in C:/idfs/plans/ for the ids-mobility crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+39. Research only do not read plan.md **[Phase 039 — Create the ids-selfreorg crate: Revise H-unit membership, placement, replicas in response to changes.]**
+
+Crate: ids-selfreorg
+Purpose: Revise H-unit membership, placement, replicas in response to changes.
+Contents: H-unit membership revision, placement revision, replica/fragment revision, recovery assignment revision, regional responsibility revision, invariant preservation during reorganisation, topology change handling.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 039 — Create the ids-selfreorg crate: Revise H-unit membership, placement, replicas in response to changes.]**
+
+Create plan-039.md in C:/idfs/plans/ for the ids-selfreorg crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+40. Research only do not read plan.md **[Phase 040 — Create the ids-immutable crate: Protect selected data against modification/deletion.]**
+
+Crate: ids-immutable
+Purpose: Protect selected data against modification/deletion.
+Contents: Immutable record protection, retention period enforcement, legal hold enforcement, enforcement across replicas/fragments/derived copies, tamper detection, retention expiry.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 040 — Create the ids-immutable crate: Protect selected data against modification/deletion.]**
+
+Create plan-040.md in C:/idfs/plans/ for the ids-immutable crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+41. Research only do not read plan.md **[Phase 041 — Create the ids-reclaim crate: Compact fragmented storage, reclaim space.]**
+
+Crate: ids-reclaim
+Purpose: Compact fragmented storage, reclaim space.
+Contents: Fragmented storage compaction, obsolete version removal, tombstone expiry, eligible data expiration, space amplification reduction, snapshot/retention compatibility, compaction scheduling, reclamation verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 041 — Create the ids-reclaim crate: Compact fragmented storage, reclaim space.]**
+
+Create plan-041.md in C:/idfs/plans/ for the ids-reclaim crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+42. Research only do not read plan.md **[Phase 042 — Create the ids-backup crate: Recovery points and incremental backup histories.]**
+
+Crate: ids-backup
+Purpose: Recovery points and incremental backup histories.
+Contents: Snapshot metadata, captured versions, consistent reads, cloning, backup copies tracked separately from serving replicas, incremental backup history, point-in-time recovery, restore verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 042 — Create the ids-backup crate: Recovery points and incremental backup histories.]**
+
+Create plan-042.md in C:/idfs/plans/ for the ids-backup crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+43. Research only do not read plan.md **[Phase 043 — Create the ids-chaos crate: Controlled fault injection for resilience validation.]**
+
+Crate: ids-chaos
+Purpose: Controlled fault injection for resilience validation.
+Contents: Fault injection harness, packet loss/reordering/duplication, network corruption, partition injection, node churn, resource exhaustion, Byzantine behavior simulation, chaos experiment execution, resilience metrics collection.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 043 — Create the ids-chaos crate: Controlled fault injection for resilience validation.]**
+
+Create plan-043.md in C:/idfs/plans/ for the ids-chaos crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+44. Research only do not read plan.md **[Phase 044 — Create the ids-observability crate: System state exposure and observability.]**
+
+Crate: ids-observability
+Purpose: System state exposure and observability.
+Contents: Metrics collection, distributed tracing, audit trail, telemetry, observability dashboard, control-plane vs data-plane separation observability, SLA/SLO tracking.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 044 — Create the ids-observability crate: System state exposure and observability.]**
+
+Create plan-044.md in C:/idfs/plans/ for the ids-observability crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+45. Research only do not read plan.md **[Phase 045 — Create the ids-client crate: Single client handle — `ids_submit(op)`.]**
+
+Crate: ids-client
+Purpose: Single client handle — `ids_submit(op)`.
+Contents: `IDS` handle struct, `ids_submit` method, write/read/update/delete/query/describe operations, logical data addressing, idempotency key management, operation reference tracking, result assembly, client-facing interface abstraction (client never addresses region/H-unit/node directly).
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 045 — Create the ids-client crate: Single client handle — `ids_submit(op)`.]**
+
+Create plan-045.md in C:/idfs/plans/ for the ids-client crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+46. Research only do not read plan.md **[Phase 046 — Create the ids-cli crate: Command-line interface.]**
+
+Crate: ids-cli
+Purpose: Command-line interface.
+Contents: CLI commands, subcommands, argument parsing, output formatting, interactive and scriptable modes, configuration loading.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 046 — Create the ids-cli crate: Command-line interface.]**
+
+Create plan-046.md in C:/idfs/plans/ for the ids-cli crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+47. Research only do not read plan.md **[Phase 047 — Create the ids-testing crate: Property-based, adversarial, conformance testing.]**
+
+Crate: ids-testing
+Purpose: Property-based, adversarial, conformance testing.
+Contents: Unit tests, integration tests, property-based tests (proptest), adversarial tests, conformance tests, test vectors, determinism, fuzzing harness, state recovery tests, chaos tests, soak tests.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 047 — Create the ids-testing crate: Property-based, adversarial, conformance testing.]**
+
+Create plan-047.md in C:/idfs/plans/ for the ids-testing crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+48. Research only do not read plan.md **[Phase 048 — Create the ids-bench crate: Performance benchmarking.]**
+
+Crate: ids-bench
+Purpose: Performance benchmarking.
+Contents: Read/write latency (p50/p95/p99), throughput, cross-domain bytes transferred, recovery completion time, durability restoration time, storage amplification, repair bandwidth, control-plane traffic, metadata convergence time, intent-compilation time, resource utilisation, cost per byte, energy per byte.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 048 — Create the ids-bench crate: Performance benchmarking.]**
+
+Create plan-048.md in C:/idfs/plans/ for the ids-bench crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+49. Research only do not read plan.md **[Phase 049 — Create the ids-doc crate: Spec, TLA+, PlusCal formal models.]**
+
+Crate: ids-doc
+Purpose: Spec, TLA+, PlusCal formal models.
+Contents: IDS Architecture Specification, TLA+ specs (session, stream, wire), PlusCal models, formal invariants, protocol conformance specification, determinism proofs, conformance suite.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 049 — Create the ids-doc crate: Spec, TLA+, PlusCal formal models.]**
+
+Create plan-049.md in C:/idfs/plans/ for the ids-doc crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+50. Research only do not read plan.md **[Phase 050 — Create the ids-session crate: Client-session binding and state.]**
+
+Crate: ids-session
+Purpose: Client-session binding and state.
+Contents: Session creation, session expiration, session key management, session state machine, session recovery, client affinity, session stickiness, session token management, session replay protection.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 050 — Create the ids-session crate: Client-session binding and state.]**
+
+Create plan-050.md in C:/idfs/plans/ for the ids-session crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+51. Research only do not read plan.md **[Phase 051 — Create the ids-metadata crate: Metadata for regions, clusters, H-units, nodes, datasets, partitions, replicas, ]**
+
+Crate: ids-metadata
+Purpose: Metadata for regions, clusters, H-units, nodes, datasets, partitions, replicas, fragments.
+Contents: Hierarchical metadata model, versioned state, explicit relationships, logical identity stability during physical changes, metadata caching/invalidation/version checks.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 051 — Create the ids-metadata crate: Metadata for regions, clusters, H-units, nodes, datasets, partitions, replicas, ]**
+
+Create plan-051.md in C:/idfs/plans/ for the ids-metadata crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+52. Research only do not read plan.md **[Phase 052 — Create the ids-membership-state crate: Node lifecycle state transitions.]**
+
+Crate: ids-membership-state
+Purpose: Node lifecycle state transitions.
+Contents: Joining, active, degraded, draining, unreachable, failed, retired states, transition recording, placement/routing integration, state persistence, state recovery after restart.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 052 — Create the ids-membership-state crate: Node lifecycle state transitions.]**
+
+Create plan-052.md in C:/idfs/plans/ for the ids-membership-state crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+53. Research only do not read plan.md **[Phase 053 — Create the ids-placement-policy crate: Dataset-specific placement policies.]**
+
+Crate: ids-placement-policy
+Purpose: Dataset-specific placement policies.
+Contents: Redundancy policy, number of full replicas, number of encoded fragments, reconstruction threshold, required placement domains, regional distribution requirements, recovery requirements, verification requirements, minimum acceptable redundancy state.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 053 — Create the ids-placement-policy crate: Dataset-specific placement policies.]**
+
+Create plan-053.md in C:/idfs/plans/ for the ids-placement-policy crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+54. Research only do not read plan.md **[Phase 054 — Create the ids-partition-map crate: Logical to physical partition mapping.]**
+
+Crate: ids-partition-map
+Purpose: Logical to physical partition mapping.
+Contents: Partition boundaries, key-range mapping, partition ownership, partition versioning, partition migration tracking, split/merge history.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 054 — Create the ids-partition-map crate: Logical to physical partition mapping.]**
+
+Create plan-054.md in C:/idfs/plans/ for the ids-partition-map crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+55. Research only do not read plan.md **[Phase 055 — Create the ids-ordering-domain crate: Ordering domains per dataset, no global master.]**
+
+Crate: ids-ordering-domain
+Purpose: Ordering domains per dataset, no global master.
+Contents: Ordering domain creation, domain membership, current committed position, pending operations, agreed operation order, domain-scoped leadership, cross-domain transaction coordination.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 055 — Create the ids-ordering-domain crate: Ordering domains per dataset, no global master.]**
+
+Create plan-055.md in C:/idfs/plans/ for the ids-ordering-domain crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+56. Research only do not read plan.md **[Phase 056 — Create the ids-operation-ref crate: Nine-character alphanumeric operation IDs separate from ordering positions.]**
+
+Crate: ids-operation-ref
+Purpose: Nine-character alphanumeric operation IDs separate from ordering positions.
+Contents: 36^9 namespace, reference generation, uniqueness guarantees, collision detection, idempotency binding, retry recognition, commit-status lookup, synchronization tracking, recovery tracking, audit records.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 056 — Create the ids-operation-ref crate: Nine-character alphanumeric operation IDs separate from ordering positions.]**
+
+Create plan-056.md in C:/idfs/plans/ for the ids-operation-ref crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+57. Research only do not read plan.md **[Phase 057 — Create the ids-commit-state crate: Write state: accepted/ordered/executing/committed/replicating/synchronized/verif]**
+
+Crate: ids-commit-state
+Purpose: Write state: accepted/ordered/executing/committed/replicating/synchronized/verified/failed.
+Contents: Commit state transitions, durability conditions, commit prefix tracking, gap detection, abort semantics, state persistence, state recovery.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 057 — Create the ids-commit-state crate: Write state: accepted/ordered/executing/committed/replicating/synchronized/verif]**
+
+Create plan-057.md in C:/idfs/plans/ for the ids-commit-state crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+58. Research only do not read plan.md **[Phase 058 — Create the ids-durability-policy crate: Per-dataset durability requirements.]**
+
+Crate: ids-durability-policy
+Purpose: Per-dataset durability requirements.
+Contents: Local persistence, quorum persistence, regional redundancy threshold, cross-region durability, acknowledgement semantics, commit vs synchronization distinction.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 058 — Create the ids-durability-policy crate: Per-dataset durability requirements.]**
+
+Create plan-058.md in C:/idfs/plans/ for the ids-durability-policy crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+59. Research only do not read plan.md **[Phase 059 — Create the ids-redundancy-mode crate: Full replication vs erasure coding per dataset.]**
+
+Crate: ids-redundancy-mode
+Purpose: Full replication vs erasure coding per dataset.
+Contents: Full replication mode, erasure coding mode, hybrid redundancy, dataset-specific redundancy, H-unit-aware redundancy, replica/fragment placement across failure domains.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 059 — Create the ids-redundancy-mode crate: Full replication vs erasure coding per dataset.]**
+
+Create plan-059.md in C:/idfs/plans/ for the ids-redundancy-mode crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+60. Research only do not read plan.md **[Phase 060 — Create the ids-consistency-profile crate: Read/write behavior per profile.]**
+
+Crate: ids-consistency-profile
+Purpose: Read/write behavior per profile.
+Contents: Local acknowledged, quorum durable, regionally durable, cross-region durable, eventually replicated, read-only degraded, causally consistent profiles, read/write behavior definitions, failure behavior.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 060 — Create the ids-consistency-profile crate: Read/write behavior per profile.]**
+
+Create plan-060.md in C:/idfs/plans/ for the ids-consistency-profile crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+61. Research only do not read plan.md **[Phase 061 — Create the ids-routing-table crate: Routing table construction and maintenance.]**
+
+Crate: ids-routing-table
+Purpose: Routing table construction and maintenance.
+Contents: Routing table entries, next-hop resolution, path selection, locality metrics, replica freshness tracking, loop prevention, route expiration/revalidation, routing convergence.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 061 — Create the ids-routing-table crate: Routing table construction and maintenance.]**
+
+Create plan-061.md in C:/idfs/plans/ for the ids-routing-table crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+62. Research only do not read plan.md **[Phase 062 — Create the ids-replication-stream crate: Ordered/versioned change propagation streams.]**
+
+Crate: ids-replication-stream
+Purpose: Ordered/versioned change propagation streams.
+Contents: Stream creation, stream versioning, resumable delivery, acknowledgement tracking, lag observability, stream interruption handling, stream recovery.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 062 — Create the ids-replication-stream crate: Ordered/versioned change propagation streams.]**
+
+Create plan-062.md in C:/idfs/plans/ for the ids-replication-stream crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+63. Research only do not read plan.md **[Phase 063 — Create the ids-sync-checkpoint crate: Verified sync points for resumable replication.]**
+
+Crate: ids-sync-checkpoint
+Purpose: Verified sync points for resumable replication.
+Contents: Checkpoint creation, checkpoint verification, resume from checkpoint, reconciliation reference, checkpoint versioning, checkpoint garbage collection.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 063 — Create the ids-sync-checkpoint crate: Verified sync points for resumable replication.]**
+
+Create plan-063.md in C:/idfs/plans/ for the ids-sync-checkpoint crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+64. Research only do not read plan.md **[Phase 064 — Create the ids-reconciliation crate: Divergent replica convergence.]**
+
+Crate: ids-reconciliation
+Purpose: Divergent replica convergence.
+Contents: Version comparison, operation history comparison, conflict and authority rules, merge semantics, CRDT integration, conflict detection, conflict resolution, silent overwrite prevention.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 064 — Create the ids-reconciliation crate: Divergent replica convergence.]**
+
+Create plan-064.md in C:/idfs/plans/ for the ids-reconciliation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+65. Research only do not read plan.md **[Phase 065 — Create the ids-mvcc crate: Snapshot isolation for reads/writes.]**
+
+Crate: ids-mvcc
+Purpose: Snapshot isolation for reads/writes.
+Contents: Version management, snapshot reads, write visibility, garbage collection of old versions, transaction isolation levels, phantom read prevention, serialization anomaly prevention.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 065 — Create the ids-mvcc crate: Snapshot isolation for reads/writes.]**
+
+Create plan-065.md in C:/idfs/plans/ for the ids-mvcc crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+66. Research only do not read plan.md **[Phase 066 — Create the ids-vector-clock crate: Causality tracking and conflict detection.]**
+
+Crate: ids-vector-clock
+Purpose: Causality tracking and conflict detection.
+Contents: Vector clock implementation, clock comparison, causality detection, clock pruning, hybrid logical clock integration, version vector tracking.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 066 — Create the ids-vector-clock crate: Causality tracking and conflict detection.]**
+
+Create plan-066.md in C:/idfs/plans/ for the ids-vector-clock crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+67. Research only do not read plan.md **[Phase 067 — Create the ids-hlc crate: Hybrid logical clock for ordering.]**
+
+Crate: ids-hlc
+Purpose: Hybrid logical clock for ordering.
+Contents: HLC implementation, physical+logical time combination, clock skew handling, ordering guarantees, fallback to IDS standard time.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 067 — Create the ids-hlc crate: Hybrid logical clock for ordering.]**
+
+Create plan-067.md in C:/idfs/plans/ for the ids-hlc crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+68. Research only do not read plan.md **[Phase 068 — Create the ids-total-order-broadcast crate: All nodes deliver messages in same order.]**
+
+Crate: ids-total-order-broadcast
+Purpose: All nodes deliver messages in same order.
+Contents: Uniform total order, atomic broadcast, consensus-based total order, FIFO-total order, state machine replication integration.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 068 — Create the ids-total-order-broadcast crate: All nodes deliver messages in same order.]**
+
+Create plan-068.md in C:/idfs/plans/ for the ids-total-order-broadcast crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+69. Research only do not read plan.md **[Phase 069 — Create the ids-causal-broadcast crate: Causally related messages delivered in order.]**
+
+Crate: ids-causal-broadcast
+Purpose: Causally related messages delivered in order.
+Contents: Causality preservation, concurrent message delivery flexibility, happens-before tracking, causal delivery guarantees.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 069 — Create the ids-causal-broadcast crate: Causally related messages delivered in order.]**
+
+Create plan-069.md in C:/idfs/plans/ for the ids-causal-broadcast crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+70. Research only do not read plan.md **[Phase 070 — Create the ids-atomic-broadcast crate: Uniform agreement on message delivery.]**
+
+Crate: ids-atomic-broadcast
+Purpose: Uniform agreement on message delivery.
+Contents: Uniform agreement, uniform integrity, validity, termination, reliable broadcast foundation, total order layer.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 070 — Create the ids-atomic-broadcast crate: Uniform agreement on message delivery.]**
+
+Create plan-070.md in C:/idfs/plans/ for the ids-atomic-broadcast crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+71. Research only do not read plan.md **[Phase 071 — Create the ids-flexible-paxos crate: Flexible quorum intersection for consensus.]**
+
+Crate: ids-flexible-paxos
+Purpose: Flexible quorum intersection for consensus.
+Contents: Phase-1/phase-2 quorum separation, non-intersecting quorums within views, intersection across views, leader election quorum, replication quorum, availability optimization.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 071 — Create the ids-flexible-paxos crate: Flexible quorum intersection for consensus.]**
+
+Create plan-071.md in C:/idfs/plans/ for the ids-flexible-paxos crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+72. Research only do not read plan.md **[Phase 072 — Create the ids-bft-consensus crate: Byzantine fault-tolerant consensus.]**
+
+Crate: ids-bft-consensus
+Purpose: Byzantine fault-tolerant consensus.
+Contents: PBFT, HotStuff, LibraBFT, Zyzzyva, SBFT, message complexity, view change, view synchronization, safety under Byzantine faults, liveness under partial synchrony.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 072 — Create the ids-bft-consensus crate: Byzantine fault-tolerant consensus.]**
+
+Create plan-072.md in C:/idfs/plans/ for the ids-bft-consensus crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+73. Research only do not read plan.md **[Phase 073 — Create the ids-authenticated-broadcast crate: Dolev-Strong authenticated broadcast.]**
+
+Crate: ids-authenticated-broadcast
+Purpose: Dolev-Strong authenticated broadcast.
+Contents: Message authentication, Byzantine broadcast with signatures, Dolev-Strong protocol, authenticated reliable broadcast, Byzantine fault tolerance with authentication.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 073 — Create the ids-authenticated-broadcast crate: Dolev-Strong authenticated broadcast.]**
+
+Create plan-073.md in C:/idfs/plans/ for the ids-authenticated-broadcast crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+74. Research only do not read plan.md **[Phase 074 — Create the ids-chandy-lamport crate: Chandy-Lamport global state recording.]**
+
+Crate: ids-chandy-lamport
+Purpose: Chandy-Lamport global state recording.
+Contents: Marker message algorithm, consistent global state, stable property detection, checkpoint/restore foundation, Flink-style barrier snapshotting integration.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 074 — Create the ids-chandy-lamport crate: Chandy-Lamport global state recording.]**
+
+Create plan-074.md in C:/idfs/plans/ for the ids-chandy-lamport crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+75. Research only do not read plan.md **[Phase 075 — Create the ids-swim crate: Scalable Weak Membership failure detection.]**
+
+Crate: ids-swim
+Purpose: Scalable Weak Membership failure detection.
+Contents: SWIM protocol, gossip-based suspicion, ping/ping-ack, suspicion dissemination, failure confirmation, scalability to thousands of nodes.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 075 — Create the ids-swim crate: Scalable Weak Membership failure detection.]**
+
+Create plan-075.md in C:/idfs/plans/ for the ids-swim crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+76. Research only do not read plan.md **[Phase 076 — Create the ids-phi-accrual crate: Phi accrual suspicion with adaptive thresholds.]**
+
+Crate: ids-phi-accrual
+Purpose: Phi accrual suspicion with adaptive thresholds.
+Contents: Phi value calculation, inter-arrival time distribution, suspicion threshold, adaptive accuracy, GC pause handling, false positive/negative tuning.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 076 — Create the ids-phi-accrual crate: Phi accrual suspicion with adaptive thresholds.]**
+
+Create plan-076.md in C:/idfs/plans/ for the ids-phi-accrual crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+77. Research only do not read plan.md **[Phase 077 — Create the ids-quorum-intersection crate: Guarantee read/write quorum intersection.]**
+
+Crate: ids-quorum-intersection
+Purpose: Guarantee read/write quorum intersection.
+Contents: Read quorum ∩ write quorum ≠ ∅, quorum system validation, intersection proof, fault tolerance calculation, quorum size optimization.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 077 — Create the ids-quorum-intersection crate: Guarantee read/write quorum intersection.]**
+
+Create plan-077.md in C:/idfs/plans/ for the ids-quorum-intersection crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+78. Research only do not read plan.md **[Phase 078 — Create the ids-circuit-breaker crate: Failure isolation via circuit breakers.]**
+
+Crate: ids-circuit-breaker
+Purpose: Failure isolation via circuit breakers.
+Contents: Closed/open/half-open states, failure threshold, success threshold, timeout, backoff strategy, per-peer circuit breakers, global circuit breakers, handshake circuit breakers.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 078 — Create the ids-circuit-breaker crate: Failure isolation via circuit breakers.]**
+
+Create plan-078.md in C:/idfs/plans/ for the ids-circuit-breaker crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+79. Research only do not read plan.md **[Phase 079 — Create the ids-bulkhead crate: Resource isolation to prevent cascade failure.]**
+
+Crate: ids-bulkhead
+Purpose: Resource isolation to prevent cascade failure.
+Contents: Thread pool isolation, connection pool isolation, memory isolation, CPU isolation, failure domain isolation, blast radius limitation.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 079 — Create the ids-bulkhead crate: Resource isolation to prevent cascade failure.]**
+
+Create plan-079.md in C:/idfs/plans/ for the ids-bulkhead crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+80. Research only do not read plan.md **[Phase 080 — Create the ids-backpressure crate: Flow control under load.]**
+
+Crate: ids-backpressure
+Purpose: Flow control under load.
+Contents: Credit-based flow control, blocked signal emission, credit reservation, credit return, queue management, load shedding, adaptive rate limiting, congestion detection.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 080 — Create the ids-backpressure crate: Flow control under load.]**
+
+Create plan-080.md in C:/idfs/plans/ for the ids-backpressure crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+81. Research only do not read plan.md **[Phase 081 — Create the ids-graceful-degradation crate: Ordered fallback states between health and failure.]**
+
+Crate: ids-graceful-degradation
+Purpose: Ordered fallback states between health and failure.
+Contents: Degradation hierarchy states, fallback behavior, recovery path, capability reduction, availability tradeoff, operator notification of degraded state.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 081 — Create the ids-graceful-degradation crate: Ordered fallback states between health and failure.]**
+
+Create plan-081.md in C:/idfs/plans/ for the ids-graceful-degradation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+82. Research only do not read plan.md **[Phase 082 — Create the ids-stonith crate: Shoot The Other Node In The Head — split-brain prevention.]**
+
+Crate: ids-stonith
+Purpose: Shoot The Other Node In The Head — split-brain prevention.
+Contents: Node-level fencing, resource-level fencing, power controller integration, IPMI channel, fencing delay configuration, priority fencing delay, STONITH enabled enforcement.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 082 — Create the ids-stonith crate: Shoot The Other Node In The Head — split-brain prevention.]**
+
+Create plan-082.md in C:/idfs/plans/ for the ids-stonith crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+83. Research only do not read plan.md **[Phase 083 — Create the ids-fencing-epoch crate: Epoch-based authority to prevent stale owners.]**
+
+Crate: ids-fencing-epoch
+Purpose: Epoch-based authority to prevent stale owners.
+Contents: Fencing token increment, fencing token checking, epoch-based leadership, stale owner prevention, recovered region split-brain prevention, authority transfer verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 083 — Create the ids-fencing-epoch crate: Epoch-based authority to prevent stale owners.]**
+
+Create plan-083.md in C:/idfs/plans/ for the ids-fencing-epoch crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+84. Research only do not read plan.md **[Phase 084 — Create the ids-reed-solomon crate: MDS erasure coding for storage efficiency.]**
+
+Crate: ids-reed-solomon
+Purpose: MDS erasure coding for storage efficiency.
+Contents: RS (n,k) code construction, systematic encoding, decoding, any k of n reconstruction, storage overhead optimization, arithmetic constraints, finite field operations.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 084 — Create the ids-reed-solomon crate: MDS erasure coding for storage efficiency.]**
+
+Create plan-084.md in C:/idfs/plans/ for the ids-reed-solomon crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+85. Research only do not read plan.md **[Phase 085 — Create the ids-regenerating-codes crate: Bandwidth-efficient node repair.]**
+
+Crate: ids-regenerating-codes
+Purpose: Bandwidth-efficient node repair.
+Contents: Regenerating code construction, repair bandwidth minimization, helper node access minimization, functional vs exact repair, regenerating code parameters.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 085 — Create the ids-regenerating-codes crate: Bandwidth-efficient node repair.]**
+
+Create plan-085.md in C:/idfs/plans/ for the ids-regenerating-codes crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+86. Research only do not read plan.md **[Phase 086 — Create the ids-locally-recoverable-codes crate: Locality-aware erasure coding.]**
+
+Crate: ids-locally-recoverable-codes
+Purpose: Locality-aware erasure coding.
+Contents: LRC construction, locality groups, single/double erasure recovery within locality, code with locality parameters, repair locality optimization.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 086 — Create the ids-locally-recoverable-codes crate: Locality-aware erasure coding.]**
+
+Create plan-086.md in C:/idfs/plans/ for the ids-locally-recoverable-codes crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+87. Research only do not read plan.md **[Phase 087 — Create the ids-ppr-reconstruction crate: Distributed erasure-coded storage repair.]**
+
+Crate: ids-ppr-reconstruction
+Purpose: Distributed erasure-coded storage repair.
+Contents: PPR algorithm, partial parallel reconstruction, reduction tree aggregation, m-PPR scheduling, concurrent failure handling, network pressure reduction.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 087 — Create the ids-ppr-reconstruction crate: Distributed erasure-coded storage repair.]**
+
+Create plan-087.md in C:/idfs/plans/ for the ids-ppr-reconstruction crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+88. Research only do not read plan.md **[Phase 088 — Create the ids-hot-tier crate: High-performance storage for frequently accessed data.]**
+
+Crate: ids-hot-tier
+Purpose: High-performance storage for frequently accessed data.
+Contents: Hot tier placement, hot tier promotion, hot tier access patterns, hot tier latency objectives, hot tier cost, hot tier capacity management.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 088 — Create the ids-hot-tier crate: High-performance storage for frequently accessed data.]**
+
+Create plan-088.md in C:/idfs/plans/ for the ids-hot-tier crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+89. Research only do not read plan.md **[Phase 089 — Create the ids-warm-tier crate: Warm storage for moderately accessed data.]**
+
+Crate: ids-warm-tier
+Purpose: Warm storage for moderately accessed data.
+Contents: Warm tier placement, warm tier promotion/demotion, warm tier cost, warm tier capacity management, warm tier access patterns.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 089 — Create the ids-warm-tier crate: Warm storage for moderately accessed data.]**
+
+Create plan-089.md in C:/idfs/plans/ for the ids-warm-tier crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+90. Research only do not read plan.md **[Phase 090 — Create the ids-cold-tier crate: Cold storage for archival data.]**
+
+Crate: ids-cold-tier
+Purpose: Cold storage for archival data.
+Contents: Cold tier placement, cold tier promotion/demotion, cold tier cost, cold tier capacity management, cold tier access patterns, retrieval latency.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 090 — Create the ids-cold-tier crate: Cold storage for archival data.]**
+
+Create plan-090.md in C:/idfs/plans/ for the ids-cold-tier crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+91. Research only do not read plan.md **[Phase 091 — Create the ids-tenant-isolation crate: Multi-tenant resource isolation.]**
+
+Crate: ids-tenant-isolation
+Purpose: Multi-tenant resource isolation.
+Contents: Per-tenant quotas, per-tenant isolation, tenant-level admission control, tenant-level policy enforcement, tenant-level resource monitoring.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 091 — Create the ids-tenant-isolation crate: Multi-tenant resource isolation.]**
+
+Create plan-091.md in C:/idfs/plans/ for the ids-tenant-isolation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+92. Research only do not read plan.md **[Phase 092 — Create the ids-resource-quota crate: Per-entity resource limits.]**
+
+Crate: ids-resource-quota
+Purpose: Per-entity resource limits.
+Contents: Storage quotas, bandwidth quotas, compute quotas, concurrency quotas, recovery bandwidth quotas, quota enforcement, quota violation handling.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 092 — Create the ids-resource-quota crate: Per-entity resource limits.]**
+
+Create plan-092.md in C:/idfs/plans/ for the ids-resource-quota crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+93. Research only do not read plan.md **[Phase 093 — Create the ids-workload-isolation crate: Prevent workload interference.]**
+
+Crate: ids-workload-isolation
+Purpose: Prevent workload interference.
+Contents: Workload classification, workload scheduling, workload priority, workload bandwidth limits, workload admission control, workload monitoring.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 093 — Create the ids-workload-isolation crate: Prevent workload interference.]**
+
+Create plan-093.md in C:/idfs/plans/ for the ids-workload-isolation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+94. Research only do not read plan.md **[Phase 094 — Create the ids-data-use-policy crate: Policy-driven data access and use.]**
+
+Crate: ids-data-use-policy
+Purpose: Policy-driven data access and use.
+Contents: Data ownership policies, read/write/replicate/process/export/delete permissions, permitted regions, permitted operators, permitted purposes, derived data restrictions, data sovereignty policies.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 094 — Create the ids-data-use-policy crate: Policy-driven data access and use.]**
+
+Create plan-094.md in C:/idfs/plans/ for the ids-data-use-policy crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+95. Research only do not read plan.md **[Phase 095 — Create the ids-ownership-policy crate: Data ownership across regions.]**
+
+Crate: ids-ownership-policy
+Purpose: Data ownership across regions.
+Contents: Dataset ownership, regional ownership, partition ownership, ownership transfer, ownership verification, custody graph integration.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 095 — Create the ids-ownership-policy crate: Data ownership across regions.]**
+
+Create plan-095.md in C:/idfs/plans/ for the ids-ownership-policy crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+96. Research only do not read plan.md **[Phase 096 — Create the ids-legal-hold crate: Prevent deletion during legal holds.]**
+
+Crate: ids-legal-hold
+Purpose: Prevent deletion during legal holds.
+Contents: Legal hold creation, legal hold scope, legal hold enforcement across replicas/fragments/derived copies, legal hold release, retention vs legal hold precedence.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 096 — Create the ids-legal-hold crate: Prevent deletion during legal holds.]**
+
+Create plan-096.md in C:/idfs/plans/ for the ids-legal-hold crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+97. Research only do not read plan.md **[Phase 097 — Create the ids-retention-enforcement crate: Enforce data retention periods.]**
+
+Crate: ids-retention-enforcement
+Purpose: Enforce data retention periods.
+Contents: Retention period tracking, retention expiry, retention across replicas, retention verification, retention vs deletion precedence, retention audit.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 097 — Create the ids-retention-enforcement crate: Enforce data retention periods.]**
+
+Create plan-097.md in C:/idfs/plans/ for the ids-retention-enforcement crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+98. Research only do not read plan.md **[Phase 098 — Create the ids-immutable-record crate: Immutable data protection.]**
+
+Crate: ids-immutable-record
+Purpose: Immutable data protection.
+Contents: Immutable record creation, immutability enforcement, tamper detection, immutable record across replicas, immutable record expiry, immutable record audit.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 098 — Create the ids-immutable-record crate: Immutable data protection.]**
+
+Create plan-098.md in C:/idfs/plans/ for the ids-immutable-record crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+99. Research only do not read plan.md **[Phase 099 — Create the ids-compaction crate: Compact fragmented storage and reclaim space.]**
+
+Crate: ids-compaction
+Purpose: Compact fragmented storage and reclaim space.
+Contents: Fragment compaction, tombstone reclamation, obsolete version removal, space amplification reduction, compaction scheduling, compaction verification.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 099 — Create the ids-compaction crate: Compact fragmented storage and reclaim space.]**
+
+Create plan-099.md in C:/idfs/plans/ for the ids-compaction crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+
+100. Research only do not read plan.md **[Phase 100 — Create the ids-reclamation crate: Reclaim eligible storage space.]**
+
+Crate: ids-reclamation
+Purpose: Reclaim eligible storage space.
+Contents: Eligible data expiration, space reclamation, snapshot/retention compatibility, reclamation verification, space reclamation audit.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 100 — Create the ids-reclamation crate: Reclaim eligible storage space.]**
+
+Create plan-100.md in C:/idfs/plans/ for the ids-reclamation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
