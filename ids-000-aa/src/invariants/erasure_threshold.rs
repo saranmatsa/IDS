@@ -2962,6 +2962,1653 @@ mod tests {
         assert_eq!(mgr.coding_params(d2).unwrap(), (8, 12));
         assert_eq!(mgr.registered_datasets().len(), 2);
     }
+
+    // ========== ErasureStripingManager tests ==========
+
+    #[test]
+    fn striping_manager_create_stripe() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = mgr.create_stripe(
+            dataset,
+            vec![0, 1, 2, 3, 4],
+            1_048_576,
+            2,
+            3,
+        );
+        let stripe = mgr.stripe(id).unwrap();
+        assert_eq!(stripe.dataset_id, dataset);
+        assert_eq!(stripe.chunk_indices.len(), 5);
+        assert_eq!(stripe.parity_chunk_count, 2);
+    }
+
+    #[test]
+    fn striping_manager_stripes_for_dataset() {
+        let mut mgr = ErasureStripingManager::new();
+        let d1 = DatasetId::new([1u8; 32]);
+        let d2 = DatasetId::new([2u8; 32]);
+        mgr.create_stripe(d1, vec![0, 1], 100, 0, 2);
+        mgr.create_stripe(d1, vec![2, 3], 200, 0, 2);
+        mgr.create_stripe(d2, vec![4, 5], 300, 0, 2);
+        let d1_stripes = mgr.stripes_for_dataset(d1);
+        assert_eq!(d1_stripes.len(), 2);
+        let d2_stripes = mgr.stripes_for_dataset(d2);
+        assert_eq!(d2_stripes.len(), 1);
+    }
+
+    #[test]
+    fn striping_manager_default_size() {
+        let mgr = ErasureStripingManager::new();
+        assert_eq!(mgr.default_stripe_size(), 1_048_576);
+    }
+
+    #[test]
+    fn striping_manager_set_default_size() {
+        let mut mgr = ErasureStripingManager::new();
+        mgr.set_default_stripe_size(4_194_304);
+        assert_eq!(mgr.default_stripe_size(), 4_194_304);
+    }
+
+    #[test]
+    fn striping_manager_remove_stripe() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = mgr.create_stripe(dataset, vec![0, 1], 100, 0, 2);
+        assert!(mgr.stripe(id).is_some());
+        let removed = mgr.remove_stripe(id);
+        assert!(removed.is_some());
+        assert!(mgr.stripe(id).is_none());
+    }
+
+    #[test]
+    fn striping_manager_total_striped_bytes() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        mgr.create_stripe(dataset, vec![0, 1], 100, 0, 2);
+        mgr.create_stripe(dataset, vec![2, 3], 200, 0, 2);
+        assert_eq!(mgr.total_striped_bytes(), 300);
+    }
+
+    // ========== ErasureRepairScheduler tests ==========
+
+    #[test]
+    fn repair_scheduler_queue_job() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = sched.queue_repair(dataset, 5, vec![0, 1, 2], RepairPriority::High);
+        let job = sched.jobs_for_dataset(dataset).first().unwrap();
+        assert_eq!(job.job_id, id);
+        assert_eq!(job.priority, RepairPriority::High);
+        assert_eq!(job.status, RepairJobStatus::Queued);
+    }
+
+    #[test]
+    fn repair_scheduler_start_next_job() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        sched.queue_repair(dataset, 0, vec![1, 2], RepairPriority::Normal);
+        sched.queue_repair(dataset, 1, vec![2, 3], RepairPriority::Critical);
+        let id = sched.start_next_job().unwrap();
+        assert_eq!(id, RepairJobId(1));
+    }
+
+    #[test]
+    fn repair_scheduler_complete_and_fail_job() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = sched.queue_repair(dataset, 0, vec![1], RepairPriority::Normal);
+        sched.start_next_job().unwrap();
+        sched.complete_job(id).unwrap();
+        assert_eq!(sched.completed_repairs(), 1);
+        assert_eq!(sched.in_progress_count(), 0);
+    }
+
+    #[test]
+    fn repair_scheduler_max_concurrent() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        sched.set_max_concurrent(1);
+        sched.queue_repair(dataset, 0, vec![1], RepairPriority::Normal);
+        sched.queue_repair(dataset, 1, vec![2], RepairPriority::Normal);
+        sched.start_next_job().unwrap();
+        assert!(sched.start_next_job().is_none());
+    }
+
+    // ========== ErasureTopologyAnalyzer tests ==========
+
+    #[test]
+    fn topology_analyzer_balanced_placement() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(2), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(3), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(analysis.balanced);
+        assert_eq!(analysis.domains_used, 3);
+        assert!(analysis.diversity_score > 0.5);
+    }
+
+    #[test]
+    fn topology_analyzer_unbalanced_placement() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(2), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(!analysis.balanced);
+        assert_eq!(analysis.max_chunks_per_domain, 2);
+        assert_eq!(analysis.min_chunks_per_domain, 1);
+    }
+
+    #[test]
+    fn topology_analyzer_is_resilient() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(2), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(3), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(ErasureTopologyAnalyzer::is_resilient(&analysis));
+    }
+
+    #[test]
+    fn topology_analyzer_recommended_min_domains() {
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(10, 3), 4);
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(10, 0), 2);
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(5, 10), 5);
+    }
+
+    // ========== ErasureIntegrityAuditor tests ==========
+
+    #[test]
+    fn integrity_auditor_record_pass() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = auditor.record_audit(dataset, 10, 0, 0);
+        let audit = auditor.audits_for_dataset(dataset).first().unwrap();
+        assert_eq!(id, audit.audit_id);
+        assert_eq!(audit.result, AuditResult::Pass);
+    }
+
+    #[test]
+    fn integrity_auditor_record_fail() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        auditor.record_audit(dataset, 10, 5, 1);
+        assert_eq!(auditor.failed_audits(), 1);
+    }
+
+    #[test]
+    fn integrity_auditor_pass_rate() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        auditor.record_audit(dataset, 10, 0, 0);
+        auditor.record_audit(dataset, 10, 5, 1);
+        assert!((auditor.pass_rate() - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn integrity_auditor_latest_audit() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        assert!(auditor.latest_audit().is_none());
+        auditor.record_audit(dataset, 10, 0, 0);
+        assert!(auditor.latest_audit().is_some());
+    }
+
+    // ========== ErasureCodeParametersValidator tests ==========
+
+    #[test]
+    fn validator_valid_params() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(4, 10, 8);
+        assert!(result.valid);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn validator_k_zero_invalid() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(0, 5, 8);
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn validator_n_less_than_k_invalid() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(5, 3, 8);
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn validator_n_exceeds_max_invalid() {
+        let validator = ErasureCodeParametersValidator::with_limits(5, 1, 8);
+        let result = validator.validate(3, 10, 8);
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn validator_recommended_params() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(4, 7, 8);
+        assert!(result.valid);
+        assert_eq!(result.recommended_k, 4);
+        assert_eq!(result.recommended_n, 7);
+    }
+
+    #[test]
+    fn validator_is_valid_bool() {
+        let validator = ErasureCodeParametersValidator::new();
+        assert!(validator.is_valid(4, 10, 8));
+        assert!(!validator.is_valid(0, 5, 8));
+    }
+
+    #[test]
+    fn validator_set_limits() {
+        let mut validator = ErasureCodeParametersValidator::new();
+        validator.set_max_n(20);
+        validator.set_min_k(2);
+        assert_eq!(validator.max_n(), 20);
+        assert_eq!(validator.min_k(), 2);
+    }
+
+    // ========== ParityMatrixGenerator tests ==========
+
+    #[test]
+    fn parity_matrix_generate_systematic() {
+        let gen = ParityMatrixGenerator::new();
+        let rows = gen.generate_systematic_parity_matrix(4, 10).unwrap();
+        assert_eq!(rows.len(), 6);
+        for row in &rows {
+            assert_eq!(row.coefficients.len(), 10);
+        }
+    }
+
+    #[test]
+    fn parity_matrix_generate_invalid() {
+        let gen = ParityMatrixGenerator::new();
+        assert!(gen.generate_systematic_parity_matrix(0, 5).is_err());
+        assert!(gen.generate_systematic_parity_matrix(10, 5).is_err());
+    }
+
+    #[test]
+    fn parity_matrix_verify_row_rank() {
+        let gen = ParityMatrixGenerator::new();
+        let rows = gen.generate_systematic_parity_matrix(4, 8).unwrap();
+        assert!(gen.verify_row_rank(&rows));
+    }
+
+    #[test]
+    fn parity_row_count() {
+        assert_eq!(ParityMatrixGenerator::parity_row_count(4, 10), 6);
+        assert_eq!(ParityMatrixGenerator::parity_row_count(5, 5), 0);
+    }
+
+    // ========== FragmentRecoveryCoordinator tests ==========
+
+    #[test]
+    fn recovery_coordinator_create_task() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = coord.create_recovery_task(dataset, vec![0, 1], vec![2, 3, 4]);
+        assert_eq!(id, RecoveryTaskId(0));
+        let tasks = coord.tasks_for_dataset(dataset);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].status, RecoveryTaskStatus::Pending);
+    }
+
+    #[test]
+    fn recovery_coordinator_start_and_complete() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.start_recovery_task(id).unwrap();
+        coord.complete_recovery_task(id).unwrap();
+        assert_eq!(coord.completed_count(), 1);
+    }
+
+    #[test]
+    fn recovery_coordinator_fail_task() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.start_recovery_task(id).unwrap();
+        coord.fail_recovery_task(id).unwrap();
+        assert_eq!(coord.failed_count(), 1);
+    }
+
+    #[test]
+    fn recovery_coordinator_pending_tasks() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.create_recovery_task(dataset, vec![1], vec![2]);
+        assert_eq!(coord.pending_tasks().len(), 2);
+    }
+
+    #[test]
+    fn recovery_coordinator_max_concurrent() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        coord.set_max_concurrent(1);
+        coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.create_recovery_task(dataset, vec![1], vec![2]);
+        coord.start_recovery_task(RecoveryTaskId(0)).unwrap();
+        assert!(coord.start_recovery_task(RecoveryTaskId(1)).is_err());
+    }
+
+    // ========== ChunkLossPatternAnalyzer tests ==========
+
+    #[test]
+    fn loss_analyzer_survivable() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(2));
+        analyzer.assign_chunk_domain(2, FailureDomainRef(3));
+        analyzer.assign_chunk_domain(3, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(4, FailureDomainRef(2));
+        let result = analyzer.analyze_loss(5, &[0, 1], 3);
+        assert!(result.survivable);
+        assert_eq!(result.surviving_chunks, 3);
+        assert_eq!(result.lost_chunks, 2);
+    }
+
+    #[test]
+    fn loss_analyzer_not_survivable() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        for i in 0..5 {
+            analyzer.assign_chunk_domain(i, FailureDomainRef(1));
+        }
+        let result = analyzer.analyze_loss(5, &[0, 1, 2, 3], 3);
+        assert!(!result.survivable);
+        assert_eq!(result.surviving_chunks, 1);
+    }
+
+    #[test]
+    fn loss_analyzer_domain_loss_distribution() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(2, FailureDomainRef(2));
+        let result = analyzer.analyze_loss(3, &[0, 1, 2], 1);
+        assert_eq!(result.worst_domain_loss, 2);
+        assert_eq!(result.loss_by_domain.get(&FailureDomainRef(1)), Some(&2));
+    }
+
+    #[test]
+    fn loss_analyzer_recommended_action() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(2));
+        let result = analyzer.analyze_loss(2, &[0], 1);
+        assert_eq!(result.recommended_action, RecoveryAction::ReconstructFromParity);
+    }
+
+    // ========== ErasureTopologyConstraintChecker tests ==========
+
+    #[test]
+    fn topology_checker_valid_placement() {
+        let checker = ErasureTopologyConstraintChecker::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(2), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(3), node_hint: None },
+        ];
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert!(checker.check_placement(&placement, &constraint));
+    }
+
+    #[test]
+    fn topology_checker_invalid_too_many_per_domain() {
+        let checker = ErasureTopologyConstraintChecker::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 3, domain: FailureDomainRef(1), node_hint: None },
+        ];
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert!(!checker.check_placement(&placement, &constraint));
+    }
+
+    #[test]
+    fn topology_checker_invalid_too_few_domains() {
+        let checker = ErasureTopologyConstraintChecker::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+        ];
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert!(!checker.check_placement(&placement, &constraint));
+    }
+
+    // ========== DecodingScheduleBuilder tests ==========
+
+    #[test]
+    fn decoding_schedule_build() {
+        let builder = DecodingScheduleBuilder::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let schedule = builder.build(dataset, &[0, 1], &[2, 3, 4, 5]);
+        assert_eq!(schedule.target_chunks.len(), 2);
+        assert_eq!(schedule.steps.len(), 2);
+    }
+
+    #[test]
+    fn decoding_schedule_step_count() {
+        let builder = DecodingScheduleBuilder::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let schedule = builder.build(dataset, &[0, 1, 2], &[3, 4]);
+        assert_eq!(DecodingScheduleBuilder::step_count(&schedule), 3);
+    }
+
+    // ========== IntegrityVerifier tests ==========
+
+    #[test]
+    fn integrity_verifier_register_and_verify() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 42);
+        let result = verifier.verify_chunk(dataset, 0, 42);
+        assert!(result.verified);
+        assert!(result.checksum_match);
+    }
+
+    #[test]
+    fn integrity_verifier_mismatch() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 42);
+        let result = verifier.verify_chunk(dataset, 0, 99);
+        assert!(!result.verified);
+        assert!(!result.checksum_match);
+    }
+
+    #[test]
+    fn integrity_verifier_failure_rate() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 1);
+        verifier.register_checksum(dataset, 1, 2);
+        verifier.verify_chunk(dataset, 0, 1);
+        verifier.verify_chunk(dataset, 1, 99);
+        assert!((verifier.failure_rate() - 0.5).abs() < 0.001);
+    }
+
+    // ========== CodingSchemeSelector tests ==========
+
+    #[test]
+    fn coding_scheme_selector_select() {
+        let selector = CodingSchemeSelector;
+        assert_eq!(selector.select_scheme(5, 3.0, false), CodingScheme::Regenerating);
+        assert_eq!(selector.select_scheme(1, 1.5, false), CodingScheme::XorParity);
+        assert_eq!(selector.select_scheme(1, 3.0, true), CodingScheme::LocallyRepairable);
+        assert_eq!(selector.select_scheme(2, 3.0, false), CodingScheme::SystematicReedSolomon);
+    }
+
+    #[test]
+    fn coding_scheme_selector_description() {
+        let desc = CodingSchemeSelector::scheme_description(CodingScheme::ReedSolomon);
+        assert!(!desc.is_empty());
+        let desc = CodingSchemeSelector::scheme_description(CodingScheme::Hybrid);
+        assert!(!desc.is_empty());
+    }
+
+    // ========== ErasureCapacityPlanner extended tests ==========
+
+    #[test]
+    fn capacity_planner_plan_for_dataset() {
+        let mut planner = ErasureCapacityPlanner::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: dataset,
+            raw_data_bytes: 1000,
+            encoded_bytes: 2000,
+            overhead_bytes: 1000,
+            overhead_ratio: 2.0,
+            failure_tolerance: 3,
+            chunks: 10,
+            data_chunks: 4,
+        });
+        let plan = planner.plan_for_dataset(dataset).unwrap();
+        assert_eq!(plan.overhead_ratio, 2.0);
+    }
+
+    #[test]
+    fn capacity_planner_remove_plan() {
+        let mut planner = ErasureCapacityPlanner::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: dataset,
+            raw_data_bytes: 1000,
+            encoded_bytes: 2000,
+            overhead_bytes: 1000,
+            overhead_ratio: 2.0,
+            failure_tolerance: 3,
+            chunks: 10,
+            data_chunks: 4,
+        });
+        assert!(planner.remove_plan(dataset).is_some());
+        assert!(planner.plan_for_dataset(dataset).is_none());
+    }
+
+    #[test]
+    fn capacity_planner_plans_by_overhead() {
+        let mut planner = ErasureCapacityPlanner::new();
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([1u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 2000,
+            overhead_bytes: 1000,
+            overhead_ratio: 2.0,
+            failure_tolerance: 3,
+            chunks: 10,
+            data_chunks: 4,
+        });
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([2u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 4000,
+            overhead_bytes: 3000,
+            overhead_ratio: 4.0,
+            failure_tolerance: 1,
+            chunks: 8,
+            data_chunks: 2,
+        });
+        let ordered = planner.plans_by_overhead();
+        assert_eq!(ordered[0].overhead_ratio, 4.0);
+        assert_eq!(ordered[1].overhead_ratio, 2.0);
+    }
+
+    #[test]
+    fn capacity_planner_datasets_over_overhead() {
+        let mut planner = ErasureCapacityPlanner::new();
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([1u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 1500,
+            overhead_bytes: 500,
+            overhead_ratio: 1.5,
+            failure_tolerance: 2,
+            chunks: 6,
+            data_chunks: 4,
+        });
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([2u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 4000,
+            overhead_bytes: 3000,
+            overhead_ratio: 4.0,
+            failure_tolerance: 1,
+            chunks: 8,
+            data_chunks: 2,
+        });
+        let over = planner.datasets_over_overhead(2.0);
+        assert_eq!(over.len(), 1);
+        assert_eq!(over[0], DatasetId::new([2u8; 32]));
+    }
+
+    // ========== Integration tests ==========
+
+    #[test]
+    fn full_erasure_workflow_integration() {
+        let mut mgr = ErasureThresholdManager::new();
+        let mut planner = ErasureCapacityPlanner::new();
+        let mut analyzer = ErasureTopologyAnalyzer::new();
+        let dataset = DatasetId::new([1u8; 32]);
+
+        mgr.register_coding_params(dataset, 4, 10, CodingScheme::SystematicReedSolomon)
+            .unwrap();
+        let plan = mgr.capacity_plan(dataset, 4096).unwrap();
+        planner.add_plan(plan);
+
+        let placement = mgr.place_chunks_across_domains(10, &[
+            FailureDomainRef(1), FailureDomainRef(2), FailureDomainRef(3),
+        ]).unwrap();
+        let analysis = analyzer.analyze_placement(&placement);
+        assert_eq!(analysis.total_chunks, 10);
+        assert!(analysis.domains_used >= 1);
+
+        mgr.mark_chunk_lost(dataset, 0);
+        let sched = mgr.schedule_reconstruction(dataset).unwrap();
+        mgr.complete_reconstruction(dataset);
+
+        assert!(mgr.is_erasure_enabled(dataset));
+        assert_eq!(mgr.healthy_chunk_count(dataset), 10);
+    }
+
+    // ========== AuditResult tests ==========
+
+    #[test]
+    fn audit_result_variants() {
+        let results = [AuditResult::Pass, AuditResult::Partial, AuditResult::Fail];
+        for r in results {
+            let _ = format!("{:?}", r);
+        }
+    }
+
+    // ========== RecoveryTaskStatus tests ==========
+
+    #[test]
+    fn recovery_task_status_variants() {
+        let statuses = [
+            RecoveryTaskStatus::Pending,
+            RecoveryTaskStatus::InProgress,
+            RecoveryTaskStatus::Completed,
+            RecoveryTaskStatus::Failed,
+            RecoveryTaskStatus::Cancelled,
+        ];
+        for s in statuses {
+            let _ = format!("{:?}", s);
+        }
+    }
+
+    // ========== RepairJobStatus tests ==========
+
+    #[test]
+    fn repair_job_status_variants() {
+        let statuses = [
+            RepairJobStatus::Queued,
+            RepairJobStatus::InProgress,
+            RepairJobStatus::Completed,
+            RepairJobStatus::Failed,
+        ];
+        for s in statuses {
+            let _ = format!("{:?}", s);
+        }
+    }
+
+    // ========== RepairPriority tests ==========
+
+    #[test]
+    fn repair_priority_ordering() {
+        assert!(RepairPriority::Critical > RepairPriority::High);
+        assert!(RepairPriority::High > RepairPriority::Normal);
+        assert!(RepairPriority::Normal > RepairPriority::Low);
+    }
+
+    // ========== StripeId tests ==========
+
+    #[test]
+    fn stripe_id_ordering() {
+        let a = StripeId(1);
+        let b = StripeId(2);
+        assert!(a < b);
+        assert_ne!(a, b);
+    }
+
+    // ========== RecoveryTaskId tests ==========
+
+    #[test]
+    fn recovery_task_id_ordering() {
+        let a = RecoveryTaskId(10);
+        let b = RecoveryTaskId(20);
+        assert!(a < b);
+        assert_ne!(a, b);
+    }
+
+    // ========== RepairJobId tests ==========
+
+    #[test]
+    fn repair_job_id_ordering() {
+        let a = RepairJobId(5);
+        let b = RepairJobId(15);
+        assert!(a < b);
+        assert_ne!(a, b);
+    }
+
+    // ========== ErasureStripingManager tests ==========
+
+    #[test]
+    fn striping_manager_create_stripe() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = mgr.create_stripe(
+            dataset,
+            vec![0, 1, 2, 3, 4],
+            1_048_576,
+            2,
+            3,
+        );
+        let stripe = mgr.stripe(id).unwrap();
+        assert_eq!(stripe.dataset_id, dataset);
+        assert_eq!(stripe.chunk_indices.len(), 5);
+        assert_eq!(stripe.parity_chunk_count, 2);
+        assert_eq!(stripe.data_chunk_count, 3);
+        assert_eq!(stripe.stripe_size_bytes, 1_048_576);
+    }
+
+    #[test]
+    fn striping_manager_stripes_for_dataset() {
+        let mut mgr = ErasureStripingManager::new();
+        let d1 = DatasetId::new([1u8; 32]);
+        let d2 = DatasetId::new([2u8; 32]);
+        mgr.create_stripe(d1, vec![0, 1], 100, 0, 2);
+        mgr.create_stripe(d1, vec![2, 3], 200, 0, 2);
+        mgr.create_stripe(d2, vec![4, 5], 300, 0, 2);
+        let d1_stripes = mgr.stripes_for_dataset(d1);
+        assert_eq!(d1_stripes.len(), 2);
+        let d2_stripes = mgr.stripes_for_dataset(d2);
+        assert_eq!(d2_stripes.len(), 1);
+        let nonexistent = mgr.stripes_for_dataset(DatasetId::new([9u8; 32]));
+        assert_eq!(nonexistent.len(), 0);
+    }
+
+    #[test]
+    fn striping_manager_default_size() {
+        let mgr = ErasureStripingManager::new();
+        assert_eq!(mgr.default_stripe_size(), 1_048_576);
+    }
+
+    #[test]
+    fn striping_manager_set_default_size() {
+        let mut mgr = ErasureStripingManager::new();
+        mgr.set_default_stripe_size(4_194_304);
+        assert_eq!(mgr.default_stripe_size(), 4_194_304);
+        mgr.set_default_stripe_size(256 * 1024 * 1024);
+        assert_eq!(mgr.default_stripe_size(), 256 * 1024 * 1024);
+    }
+
+    #[test]
+    fn striping_manager_remove_stripe() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = mgr.create_stripe(dataset, vec![0, 1], 100, 0, 2);
+        assert!(mgr.stripe(id).is_some());
+        let removed = mgr.remove_stripe(id);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().stripe_id, id);
+        assert!(mgr.stripe(id).is_none());
+    }
+
+    #[test]
+    fn striping_manager_remove_nonexistent() {
+        let mut mgr = ErasureStripingManager::new();
+        assert!(mgr.remove_stripe(StripeId(999)).is_none());
+    }
+
+    #[test]
+    fn striping_manager_total_striped_bytes() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        mgr.create_stripe(dataset, vec![0, 1], 100, 0, 2);
+        mgr.create_stripe(dataset, vec![2, 3], 200, 0, 2);
+        mgr.create_stripe(dataset, vec![4, 5], 300, 0, 2);
+        assert_eq!(mgr.total_striped_bytes(), 600);
+        assert_eq!(mgr.stripe_count(), 3);
+    }
+
+    #[test]
+    fn striping_manager_stripe_id_ordering() {
+        let mut mgr = ErasureStripingManager::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id1 = mgr.create_stripe(dataset, vec![0], 100, 0, 1);
+        let id2 = mgr.create_stripe(dataset, vec![1], 200, 0, 1);
+        assert!(id1.0 < id2.0);
+        assert_ne!(id1, id2);
+    }
+
+    // ========== ErasureRepairScheduler tests ==========
+
+    #[test]
+    fn repair_scheduler_queue_job() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = sched.queue_repair(dataset, 5, vec![0, 1, 2], RepairPriority::High);
+        let jobs = sched.jobs_for_dataset(dataset);
+        assert_eq!(jobs.len(), 1);
+        let job = jobs.first().unwrap();
+        assert_eq!(job.job_id, id);
+        assert_eq!(job.lost_chunk_index, 5);
+        assert_eq!(job.priority, RepairPriority::High);
+        assert_eq!(job.status, RepairJobStatus::Queued);
+        assert_eq!(job.helper_chunk_indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn repair_scheduler_start_next_job_priority_order() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let low_id = sched.queue_repair(dataset, 0, vec![1], RepairPriority::Low);
+        let crit_id = sched.queue_repair(dataset, 1, vec![2], RepairPriority::Critical);
+        let norm_id = sched.queue_repair(dataset, 2, vec![3], RepairPriority::Normal);
+
+        let first = sched.start_next_job().unwrap();
+        assert_eq!(first, crit_id);
+
+        let second = sched.start_next_job().unwrap();
+        assert_eq!(second, norm_id);
+
+        let third = sched.start_next_job().unwrap();
+        assert_eq!(third, low_id);
+
+        assert!(sched.start_next_job().is_none());
+    }
+
+    #[test]
+    fn repair_scheduler_max_concurrent() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        sched.set_max_concurrent(1);
+        sched.queue_repair(dataset, 0, vec![1], RepairPriority::Normal);
+        sched.queue_repair(dataset, 1, vec![2], RepairPriority::Normal);
+        sched.start_next_job().unwrap();
+        assert_eq!(sched.in_progress_count(), 1);
+        assert!(sched.start_next_job().is_none());
+    }
+
+    #[test]
+    fn repair_scheduler_complete_and_fail_job() {
+        let mut sched = ErasureRepairScheduler::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = sched.queue_repair(dataset, 0, vec![1], RepairPriority::Normal);
+        sched.start_next_job().unwrap();
+        sched.complete_job(id).unwrap();
+        assert_eq!(sched.completed_repairs(), 1);
+        assert_eq!(sched.in_progress_count(), 0);
+        assert_eq!(sched.total_jobs(), 1);
+
+        // Fail job
+        let id2 = sched.queue_repair(dataset, 1, vec![2], RepairPriority::Normal);
+        sched.start_next_job().unwrap();
+        sched.fail_job(id2, "helper unavailable".to_string()).unwrap();
+        assert_eq!(sched.total_jobs(), 2);
+        assert_eq!(sched.completed_repairs(), 1);
+    }
+
+    #[test]
+    fn repair_scheduler_complete_nonexistent_job() {
+        let mut sched = ErasureRepairScheduler::new();
+        assert!(sched.complete_job(RepairJobId(999)).is_err());
+        assert!(sched.fail_job(RepairJobId(999), "err".to_string()).is_err());
+    }
+
+    #[test]
+    fn repair_scheduler_jobs_for_dataset() {
+        let mut sched = ErasureRepairScheduler::new();
+        let d1 = DatasetId::new([1u8; 32]);
+        let d2 = DatasetId::new([2u8; 32]);
+        sched.queue_repair(d1, 0, vec![1], RepairPriority::Normal);
+        sched.queue_repair(d1, 1, vec![2], RepairPriority::Normal);
+        sched.queue_repair(d2, 0, vec![1], RepairPriority::Normal);
+        assert_eq!(sched.jobs_for_dataset(d1).len(), 2);
+        assert_eq!(sched.jobs_for_dataset(d2).len(), 1);
+    }
+
+    #[test]
+    fn repair_priority_ordering() {
+        assert!(RepairPriority::Critical > RepairPriority::High);
+        assert!(RepairPriority::High > RepairPriority::Normal);
+        assert!(RepairPriority::Normal > RepairPriority::Low);
+        assert!(RepairPriority::Low as u8 < RepairPriority::Critical as u8);
+    }
+
+    #[test]
+    fn repair_job_status_variants() {
+        let statuses = [
+            RepairJobStatus::Queued,
+            RepairJobStatus::InProgress,
+            RepairJobStatus::Completed,
+            RepairJobStatus::Failed,
+        ];
+        for s in statuses {
+            let _ = format!("{:?}", s);
+        }
+    }
+
+    // ========== ErasureTopologyAnalyzer tests ==========
+
+    #[test]
+    fn topology_analyzer_balanced_placement() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(2), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(3), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(analysis.balanced);
+        assert_eq!(analysis.domains_used, 3);
+        assert_eq!(analysis.total_chunks, 3);
+        assert_eq!(analysis.max_chunks_per_domain, 1);
+        assert_eq!(analysis.min_chunks_per_domain, 1);
+        assert!(analysis.diversity_score > 0.5);
+    }
+
+    #[test]
+    fn topology_analyzer_unbalanced_placement() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(2), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(!analysis.balanced);
+        assert_eq!(analysis.max_chunks_per_domain, 2);
+        assert_eq!(analysis.min_chunks_per_domain, 1);
+        assert_eq!(analysis.domains_used, 2);
+    }
+
+    #[test]
+    fn topology_analyzer_all_same_domain() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(!analysis.balanced);
+        assert_eq!(analysis.domains_used, 1);
+        assert!(!ErasureTopologyAnalyzer::is_resilient(&analysis));
+    }
+
+    #[test]
+    fn topology_analyzer_empty_placement() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let analysis = analyzer.analyze_placement(&[]);
+        assert_eq!(analysis.total_chunks, 0);
+        assert_eq!(analysis.domains_used, 0);
+        assert_eq!(analysis.diversity_score, 0.0);
+    }
+
+    #[test]
+    fn topology_analyzer_is_resilient_true() {
+        let analyzer = ErasureTopologyAnalyzer::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(2), node_hint: None },
+        ];
+        let analysis = analyzer.analyze_placement(&placement);
+        assert!(ErasureTopologyAnalyzer::is_resilient(&analysis));
+    }
+
+    #[test]
+    fn topology_analyzer_recommended_min_domains() {
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(10, 3), 4);
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(10, 0), 2);
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(5, 10), 5);
+        assert_eq!(ErasureTopologyAnalyzer::recommended_min_domains(1, 0), 2);
+    }
+
+    // ========== ErasureIntegrityAuditor tests ==========
+
+    #[test]
+    fn integrity_auditor_record_pass() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = auditor.record_audit(dataset, 10, 0, 0);
+        let audit = auditor.audits_for_dataset(dataset).first().unwrap();
+        assert_eq!(id, audit.audit_id);
+        assert_eq!(audit.chunks_checked, 10);
+        assert_eq!(audit.chunks_corrupt, 0);
+        assert_eq!(audit.chunks_repaired, 0);
+        assert_eq!(audit.result, AuditResult::Pass);
+    }
+
+    #[test]
+    fn integrity_auditor_record_partial() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        auditor.record_audit(dataset, 10, 3, 3);
+        let audit = auditor.latest_audit().unwrap();
+        assert_eq!(audit.result, AuditResult::Partial);
+    }
+
+    #[test]
+    fn integrity_auditor_record_fail() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        auditor.record_audit(dataset, 10, 5, 1);
+        assert_eq!(auditor.failed_audits(), 1);
+        assert_eq!(auditor.total_audits(), 1);
+        let audit = auditor.latest_audit().unwrap();
+        assert_eq!(audit.result, AuditResult::Fail);
+    }
+
+    #[test]
+    fn integrity_auditor_pass_rate() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        auditor.record_audit(dataset, 10, 0, 0);
+        auditor.record_audit(dataset, 10, 5, 1);
+        assert!((auditor.pass_rate() - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn integrity_auditor_pass_rate_all_pass() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        auditor.record_audit(dataset, 10, 0, 0);
+        auditor.record_audit(dataset, 10, 0, 0);
+        assert!((auditor.pass_rate() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn integrity_auditor_no_audits() {
+        let auditor = ErasureIntegrityAuditor::new();
+        assert_eq!(auditor.total_audits(), 0);
+        assert_eq!(auditor.failed_audits(), 0);
+        assert!((auditor.pass_rate() - 1.0).abs() < 0.001);
+        assert!(auditor.latest_audit().is_none());
+    }
+
+    #[test]
+    fn integrity_auditor_audits_for_dataset() {
+        let mut auditor = ErasureIntegrityAuditor::new();
+        let d1 = DatasetId::new([1u8; 32]);
+        let d2 = DatasetId::new([2u8; 32]);
+        auditor.record_audit(d1, 5, 0, 0);
+        auditor.record_audit(d2, 5, 0, 0);
+        auditor.record_audit(d1, 5, 1, 0);
+        assert_eq!(auditor.audits_for_dataset(d1).len(), 2);
+        assert_eq!(auditor.audits_for_dataset(d2).len(), 1);
+    }
+
+    #[test]
+    fn audit_result_variants() {
+        let results = [AuditResult::Pass, AuditResult::Partial, AuditResult::Fail];
+        for r in results {
+            let _ = format!("{:?}", r);
+        }
+    }
+
+    // ========== ErasureCodeParametersValidator tests ==========
+
+    #[test]
+    fn validator_valid_params() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(4, 10, 8);
+        assert!(result.valid);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn validator_k_zero_invalid() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(0, 5, 8);
+        assert!(!result.valid);
+        assert!(!result.errors.is_empty());
+    }
+
+    #[test]
+    fn validator_n_less_than_k_invalid() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(5, 3, 8);
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn validator_n_exceeds_max_invalid() {
+        let validator = ErasureCodeParametersValidator::with_limits(5, 1, 8);
+        let result = validator.validate(3, 10, 8);
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn validator_recommended_params() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(4, 7, 8);
+        assert!(result.valid);
+        assert_eq!(result.recommended_k, 4);
+        assert_eq!(result.recommended_n, 7);
+    }
+
+    #[test]
+    fn validator_is_valid_bool() {
+        let validator = ErasureCodeParametersValidator::new();
+        assert!(validator.is_valid(4, 10, 8));
+        assert!(!validator.is_valid(0, 5, 8));
+    }
+
+    #[test]
+    fn validator_set_limits() {
+        let mut validator = ErasureCodeParametersValidator::new();
+        validator.set_max_n(20);
+        validator.set_min_k(2);
+        assert_eq!(validator.max_n(), 20);
+        assert_eq!(validator.min_k(), 2);
+    }
+
+    #[test]
+    fn validator_warnings_low_tolerance() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(4, 5, 8);
+        assert!(result.valid);
+        assert!(!result.warnings.is_empty());
+        assert!(matches!(
+            result.warnings[0],
+            ErasureParameterWarning::LowFaultTolerance { tolerance: 1 }
+        ));
+    }
+
+    #[test]
+    fn validator_warnings_high_overhead() {
+        let validator = ErasureCodeParametersValidator::new();
+        let result = validator.validate(2, 10, 8);
+        assert!(result.valid);
+        let has_overhead_warning = result.warnings.iter().any(|w| matches!(
+            w,
+            ErasureParameterWarning::HighStorageOverhead { .. }
+        ));
+        assert!(has_overhead_warning);
+    }
+
+    // ========== ParityMatrixGenerator tests ==========
+
+    #[test]
+    fn parity_matrix_generate_systematic() {
+        let gen = ParityMatrixGenerator::new();
+        let rows = gen.generate_systematic_parity_matrix(4, 10).unwrap();
+        assert_eq!(rows.len(), 6);
+        for row in &rows {
+            assert_eq!(row.coefficients.len(), 10);
+        }
+    }
+
+    #[test]
+    fn parity_matrix_generate_invalid() {
+        let gen = ParityMatrixGenerator::new();
+        assert!(gen.generate_systematic_parity_matrix(0, 5).is_err());
+        assert!(gen.generate_systematic_parity_matrix(10, 5).is_err());
+    }
+
+    #[test]
+    fn parity_matrix_verify_row_rank() {
+        let gen = ParityMatrixGenerator::new();
+        let rows = gen.generate_systematic_parity_matrix(4, 8).unwrap();
+        assert!(gen.verify_row_rank(&rows));
+    }
+
+    #[test]
+    fn parity_row_count() {
+        assert_eq!(ParityMatrixGenerator::parity_row_count(4, 10), 6);
+        assert_eq!(ParityMatrixGenerator::parity_row_count(5, 5), 0);
+        assert_eq!(ParityMatrixGenerator::parity_row_count(100, 200), 100);
+    }
+
+    // ========== FragmentRecoveryCoordinator tests ==========
+
+    #[test]
+    fn recovery_coordinator_create_task() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = coord.create_recovery_task(dataset, vec![0, 1], vec![2, 3, 4]);
+        assert_eq!(id, RecoveryTaskId(0));
+        let tasks = coord.tasks_for_dataset(dataset);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].status, RecoveryTaskStatus::Pending);
+        assert_eq!(tasks[0].missing_chunk_indices, vec![0, 1]);
+        assert_eq!(tasks[0].source_chunk_indices, vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn recovery_coordinator_start_and_complete() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.start_recovery_task(id).unwrap();
+        coord.complete_recovery_task(id).unwrap();
+        assert_eq!(coord.completed_count(), 1);
+        let task = coord.tasks_for_dataset(dataset).first().unwrap();
+        assert_eq!(task.status, RecoveryTaskStatus::Completed);
+    }
+
+    #[test]
+    fn recovery_coordinator_fail_task() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let id = coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.start_recovery_task(id).unwrap();
+        coord.fail_recovery_task(id).unwrap();
+        assert_eq!(coord.failed_count(), 1);
+        let task = coord.tasks_for_dataset(dataset).first().unwrap();
+        assert_eq!(task.status, RecoveryTaskStatus::Failed);
+    }
+
+    #[test]
+    fn recovery_coordinator_pending_tasks() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.create_recovery_task(dataset, vec![1], vec![2]);
+        assert_eq!(coord.pending_tasks().len(), 2);
+    }
+
+    #[test]
+    fn recovery_coordinator_max_concurrent() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        coord.set_max_concurrent(1);
+        coord.create_recovery_task(dataset, vec![0], vec![1]);
+        coord.create_recovery_task(dataset, vec![1], vec![2]);
+        coord.start_recovery_task(RecoveryTaskId(0)).unwrap();
+        assert!(coord.start_recovery_task(RecoveryTaskId(1)).is_err());
+    }
+
+    #[test]
+    fn recovery_coordinator_start_nonexistent_task() {
+        let mut coord = FragmentRecoveryCoordinator::new();
+        assert!(coord.start_recovery_task(RecoveryTaskId(999)).is_err());
+        assert!(coord.complete_recovery_task(RecoveryTaskId(999)).is_err());
+        assert!(coord.fail_recovery_task(RecoveryTaskId(999)).is_err());
+    }
+
+    // ========== ChunkLossPatternAnalyzer tests ==========
+
+    #[test]
+    fn loss_analyzer_survivable() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(2));
+        analyzer.assign_chunk_domain(2, FailureDomainRef(3));
+        analyzer.assign_chunk_domain(3, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(4, FailureDomainRef(2));
+        let result = analyzer.analyze_loss(5, &[0, 1], 3);
+        assert!(result.survivable);
+        assert_eq!(result.surviving_chunks, 3);
+        assert_eq!(result.lost_chunks, 2);
+        assert_eq!(result.total_chunks, 5);
+    }
+
+    #[test]
+    fn loss_analyzer_not_survivable() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        for i in 0..5 {
+            analyzer.assign_chunk_domain(i, FailureDomainRef(1));
+        }
+        let result = analyzer.analyze_loss(5, &[0, 1, 2, 3], 3);
+        assert!(!result.survivable);
+        assert_eq!(result.surviving_chunks, 1);
+        assert_eq!(result.worst_domain_loss, 4);
+    }
+
+    #[test]
+    fn loss_analyzer_domain_loss_distribution() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(2, FailureDomainRef(2));
+        let result = analyzer.analyze_loss(3, &[0, 1, 2], 1);
+        assert_eq!(result.worst_domain_loss, 2);
+        assert_eq!(result.loss_by_domain.get(&FailureDomainRef(1)), Some(&2));
+        assert_eq!(result.loss_by_domain.get(&FailureDomainRef(2)), Some(&1));
+    }
+
+    #[test]
+    fn loss_analyzer_recommended_action_reconstruct_parity() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(2));
+        let result = analyzer.analyze_loss(2, &[0], 1);
+        assert_eq!(result.recommended_action, RecoveryAction::ReconstructFromParity);
+    }
+
+    #[test]
+    fn loss_analyzer_recommended_action_declare_loss() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(1, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(2, FailureDomainRef(2));
+        analyzer.assign_chunk_domain(3, FailureDomainRef(1));
+        analyzer.assign_chunk_domain(4, FailureDomainRef(1));
+        let result = analyzer.analyze_loss(5, &[0, 1, 2, 3, 4], 2);
+        assert_eq!(result.recommended_action, RecoveryAction::DeclareDataLoss);
+    }
+
+    #[test]
+    fn loss_analyzer_no_loss() {
+        let mut analyzer = ChunkLossPatternAnalyzer::new();
+        analyzer.assign_chunk_domain(0, FailureDomainRef(1));
+        let result = analyzer.analyze_loss(1, &[], 1);
+        assert!(result.survivable);
+        assert_eq!(result.lost_chunks, 0);
+        assert_eq!(result.surviving_chunks, 1);
+        assert_eq!(result.worst_domain_loss, 0);
+    }
+
+    // ========== ErasureTopologyConstraintChecker tests ==========
+
+    #[test]
+    fn topology_checker_valid_placement() {
+        let checker = ErasureTopologyConstraintChecker::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(2), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(3), node_hint: None },
+        ];
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert!(checker.check_placement(&placement, &constraint));
+    }
+
+    #[test]
+    fn topology_checker_invalid_too_many_per_domain() {
+        let checker = ErasureTopologyConstraintChecker::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 2, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 3, domain: FailureDomainRef(1), node_hint: None },
+        ];
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert!(!checker.check_placement(&placement, &constraint));
+    }
+
+    #[test]
+    fn topology_checker_invalid_too_few_domains() {
+        let checker = ErasureTopologyConstraintChecker::new();
+        let placement = vec![
+            ChunkPlacement { chunk_index: 0, domain: FailureDomainRef(1), node_hint: None },
+            ChunkPlacement { chunk_index: 1, domain: FailureDomainRef(1), node_hint: None },
+        ];
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert!(!checker.check_placement(&placement, &constraint));
+    }
+
+    #[test]
+    fn topology_checker_default_constraints() {
+        let constraint = ErasureTopologyConstraintChecker::default_constraints();
+        assert_eq!(constraint.max_chunks_per_domain, 3);
+        assert_eq!(constraint.min_domains, 3);
+        assert!(constraint.require_region_diversity);
+    }
+
+    // ========== DecodingScheduleBuilder tests ==========
+
+    #[test]
+    fn decoding_schedule_build() {
+        let builder = DecodingScheduleBuilder::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let schedule = builder.build(dataset, &[0, 1], &[2, 3, 4, 5]);
+        assert_eq!(schedule.target_chunks.len(), 2);
+        assert_eq!(schedule.steps.len(), 2);
+        assert_eq!(schedule.dataset_id, dataset);
+    }
+
+    #[test]
+    fn decoding_schedule_step_count() {
+        let builder = DecodingScheduleBuilder::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let schedule = builder.build(dataset, &[0, 1, 2], &[3, 4]);
+        assert_eq!(DecodingScheduleBuilder::step_count(&schedule), 3);
+    }
+
+    // ========== IntegrityVerifier tests ==========
+
+    #[test]
+    fn integrity_verifier_register_and_verify() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 42);
+        let result = verifier.verify_chunk(dataset, 0, 42);
+        assert!(result.verified);
+        assert!(result.checksum_match);
+    }
+
+    #[test]
+    fn integrity_verifier_mismatch() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 42);
+        let result = verifier.verify_chunk(dataset, 0, 99);
+        assert!(!result.verified);
+        assert!(!result.checksum_match);
+    }
+
+    #[test]
+    fn integrity_verifier_failure_rate() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 1);
+        verifier.register_checksum(dataset, 1, 2);
+        verifier.verify_chunk(dataset, 0, 1);
+        verifier.verify_chunk(dataset, 1, 99);
+        assert!((verifier.failure_rate() - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn integrity_verifier_no_checksums() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        let result = verifier.verify_chunk(dataset, 0, 0);
+        // No registered checksum means expected is 0, actual is 0 => match
+        assert!(result.checksum_match);
+    }
+
+    #[test]
+    fn integrity_verifier_counts() {
+        let mut verifier = IntegrityVerifier::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        verifier.register_checksum(dataset, 0, 1);
+        verifier.verify_chunk(dataset, 0, 1);
+        assert_eq!(verifier.verification_count(), 1);
+        assert_eq!(verifier.failure_count(), 0);
+        verifier.verify_chunk(dataset, 0, 2);
+        assert_eq!(verifier.verification_count(), 2);
+        assert_eq!(verifier.failure_count(), 1);
+    }
+
+    // ========== CodingSchemeSelector tests ==========
+
+    #[test]
+    fn coding_scheme_selector_select() {
+        let selector = CodingSchemeSelector;
+        assert_eq!(selector.select_scheme(5, 3.0, false), CodingScheme::Regenerating);
+        assert_eq!(selector.select_scheme(1, 1.5, false), CodingScheme::XorParity);
+        assert_eq!(selector.select_scheme(1, 3.0, true), CodingScheme::LocallyRepairable);
+        assert_eq!(selector.select_scheme(2, 3.0, false), CodingScheme::SystematicReedSolomon);
+    }
+
+    #[test]
+    fn coding_scheme_selector_description() {
+        let desc = CodingSchemeSelector::scheme_description(CodingScheme::ReedSolomon);
+        assert!(!desc.is_empty());
+        assert!(desc.contains("Reed-Solomon"));
+        let desc = CodingSchemeSelector::scheme_description(CodingScheme::Hybrid);
+        assert!(!desc.is_empty());
+        let desc = CodingSchemeSelector::scheme_description(CodingScheme::XorParity);
+        assert!(!desc.is_empty());
+    }
+
+    // ========== ErasureCapacityPlanner extended tests ==========
+
+    #[test]
+    fn capacity_planner_plan_for_dataset() {
+        let mut planner = ErasureCapacityPlanner::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: dataset,
+            raw_data_bytes: 1000,
+            encoded_bytes: 2000,
+            overhead_bytes: 1000,
+            overhead_ratio: 2.0,
+            failure_tolerance: 3,
+            chunks: 10,
+            data_chunks: 4,
+        });
+        let plan = planner.plan_for_dataset(dataset).unwrap();
+        assert_eq!(plan.overhead_ratio, 2.0);
+        assert_eq!(plan.failure_tolerance, 3);
+    }
+
+    #[test]
+    fn capacity_planner_remove_plan() {
+        let mut planner = ErasureCapacityPlanner::new();
+        let dataset = DatasetId::new([1u8; 32]);
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: dataset,
+            raw_data_bytes: 1000,
+            encoded_bytes: 2000,
+            overhead_bytes: 1000,
+            overhead_ratio: 2.0,
+            failure_tolerance: 3,
+            chunks: 10,
+            data_chunks: 4,
+        });
+        assert!(planner.remove_plan(dataset).is_some());
+        assert!(planner.plan_for_dataset(dataset).is_none());
+        assert!(planner.remove_plan(dataset).is_none());
+    }
+
+    #[test]
+    fn capacity_planner_plans_by_overhead() {
+        let mut planner = ErasureCapacityPlanner::new();
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([1u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 2000,
+            overhead_bytes: 1000,
+            overhead_ratio: 2.0,
+            failure_tolerance: 3,
+            chunks: 10,
+            data_chunks: 4,
+        });
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([2u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 4000,
+            overhead_bytes: 3000,
+            overhead_ratio: 4.0,
+            failure_tolerance: 1,
+            chunks: 8,
+            data_chunks: 2,
+        });
+        let ordered = planner.plans_by_overhead();
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0].overhead_ratio, 4.0);
+        assert_eq!(ordered[1].overhead_ratio, 2.0);
+    }
+
+    #[test]
+    fn capacity_planner_datasets_over_overhead() {
+        let mut planner = ErasureCapacityPlanner::new();
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([1u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 1500,
+            overhead_bytes: 500,
+            overhead_ratio: 1.5,
+            failure_tolerance: 2,
+            chunks: 6,
+            data_chunks: 4,
+        });
+        planner.add_plan(ErasureCapacityPlan {
+            dataset_id: DatasetId::new([2u8; 32]),
+            raw_data_bytes: 1000,
+            encoded_bytes: 4000,
+            overhead_bytes: 3000,
+            overhead_ratio: 4.0,
+            failure_tolerance: 1,
+            chunks: 8,
+            data_chunks: 2,
+        });
+        let over = planner.datasets_over_overhead(2.0);
+        assert_eq!(over.len(), 1);
+        assert_eq!(over[0], DatasetId::new([2u8; 32]));
+    }
+
+    #[test]
+    fn capacity_planner_empty() {
+        let planner = ErasureCapacityPlanner::new();
+        assert_eq!(planner.dataset_count(), 0);
+        assert_eq!(planner.plans_by_overhead().len(), 0);
+        assert_eq!(planner.datasets_over_overhead(0.0).len(), 0);
+    }
+
+    // ========== Integration tests ==========
+
+    #[test]
+    fn full_erasure_workflow_integration() {
+        let mut mgr = ErasureThresholdManager::new();
+        let mut planner = ErasureCapacityPlanner::new();
+        let mut analyzer = ErasureTopologyAnalyzer::new();
+        let dataset = DatasetId::new([1u8; 32]);
+
+        mgr.register_coding_params(dataset, 4, 10, CodingScheme::SystematicReedSolomon)
+            .unwrap();
+        let plan = mgr.capacity_plan(dataset, 4096).unwrap();
+        planner.add_plan(plan);
+
+        let placement = mgr.place_chunks_across_domains(10, &[
+            FailureDomainRef(1), FailureDomainRef(2), FailureDomainRef(3),
+        ]).unwrap();
+        let analysis = analyzer.analyze_placement(&placement);
+        assert_eq!(analysis.total_chunks, 10);
+        assert!(analysis.domains_used >= 1);
+
+        mgr.mark_chunk_lost(dataset, 0);
+        let sched = mgr.schedule_reconstruction(dataset).unwrap();
+        mgr.complete_reconstruction(dataset);
+
+        assert!(mgr.is_erasure_enabled(dataset));
+        assert_eq!(mgr.healthy_chunk_count(dataset), 10);
+    }
+
+    // ========== DatasetId tests ==========
+
+    #[test]
+    fn dataset_id_equality() {
+        let a = DatasetId::new([1u8; 32]);
+        let b = DatasetId::new([1u8; 32]);
+        let c = DatasetId::new([2u8; 32]);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // ========== StripeId tests ==========
+
+    #[test]
+    fn stripe_id_ordering_test() {
+        let a = StripeId(1);
+        let b = StripeId(2);
+        assert!(a < b);
+        assert_ne!(a, b);
+    }
+
+    // ========== RecoveryTaskId tests ==========
+
+    #[test]
+    fn recovery_task_id_ordering() {
+        let a = RecoveryTaskId(10);
+        let b = RecoveryTaskId(20);
+        assert!(a < b);
+        assert_ne!(a, b);
+    }
+
+    // ========== RecoveryTaskStatus tests ==========
+
+    #[test]
+    fn recovery_task_status_variants() {
+        let statuses = [
+            RecoveryTaskStatus::Pending,
+            RecoveryTaskStatus::InProgress,
+            RecoveryTaskStatus::Completed,
+            RecoveryTaskStatus::Failed,
+            RecoveryTaskStatus::Cancelled,
+        ];
+        for s in statuses {
+            let _ = format!("{:?}", s);
+        }
+    }
+
+    // ========== ErasureThreshold bit tests ==========
+
+    #[test]
+    fn erasure_threshold_bit_position() {
+        assert_eq!(ERASURE_THRESHOLD_BIT, 1 << 8);
+    }
+
+    #[test]
+    fn erasure_threshold_enabled_checks_bit() {
+        let mut bits = EdgeCaseBits(0);
+        assert!(!erasure_threshold_enabled(&bits));
+        bits.enable(ERASURE_THRESHOLD_BIT);
+        assert!(erasure_threshold_enabled(&bits));
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
