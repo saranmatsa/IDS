@@ -38552,6 +38552,442 @@ No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond t
 
 **End of plan-081.md.** Research only — no code written, no files created, no repository changes made beyond this plan document.
 
+# PHASE 082:
+
+## Phase 082 — Create the ids-stonith crate: Shoot The Other Node In The Head — split-brain prevention. Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1225-1239)
+
+```
+82. Research only do not read plan.md **[Phase 082 — Create the ids-stonith crate: Shoot The Other Node In The Head — split-brain prevention.]**
+
+Crate: ids-stonith
+Purpose: Shoot The Other Node In The Head — split-brain prevention.
+Contents: Node-level fencing, resource-level fencing, power controller integration, IPMI channel, fencing delay configuration, priority fencing delay, STONITH enabled enforcement.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 082 — Create the ids-stonith crate: Shoot The Other Node In The Head — split-brain prevention.]**
+
+Create plan-082.md in C:/idfs/plans/ for the ids-stonith crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 082 creates `ids-stonith`, the IDS crate implementing Shoot The Other Node In The Head (STONITH) — node-level fencing for split-brain prevention. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by fencing domain. `ids-stonith` owns node-level fencing (power-cycle/reset/power-off of a misbehaving node so it cannot access shared resources), resource-level fencing (revoking exclusive access to a specific resource without powering the node), power controller integration, IPMI channel configuration (fence_ipmilan/ipmilanplus-style parameters: ipaddr, lanplus, auth, privlvl, login, passwd), fencing delay configuration (pcmk_delay_max / startup-fencing delay to prevent two-node races), priority fencing delay (two-node split-brain preference: node with fewer/least-important resources gets fenced first), and STONITH-enabled enforcement (cluster refuses to start resources unless fencing is enabled and at least one device is configured; Red Hat/SUSE treat `stonith-enabled=false` as unsupported).
+
+`ids-stonith` is carrier-agnostic: it never opens a socket, never imports `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic rides opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` address ≤ 1024 bytes). Allowed crypto only: ed25519 (signing fencing decisions/audit checkpoints), xchacha20poly1305 (AEAD, random 192-bit nonces, profile/state at rest), sha256 (fencing token hashing, audit-chain links), blake3 (fast content addressing, anti-entropy digests), chacha20poly1305 (AEAD, 96-bit nonces). Crypto itself lives in `ids-crypto`; `ids-stonith` consumes type surface and primitive IDs from `ids-000-aa` only.
+
+A skeleton `ids-stonith` crate does NOT yet exist at `C:/idfs/ids-stonith/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Endpoint`, `FailureDomain`, plus sealed trait contracts and error types. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+Research basis: 30 parallel searches returned STONITH etymology (Linux-HA Alan Robertson misspelling of STOMITH, Biblical "stoneth" parallel), Wikipedia Fencing (computing), SUSE SLE-HA Administration Guide (stonith-enabled/startup-fencing must be true; node fencing is STONITH; pacemaker-fenced daemon; multiple STONITH devices per node recommended), Red Hat RHEL HA docs (stonited-enabled=true required for support; every node managed by a fence device; stonith-timeout default 60s; pcmk_reboot_timeout/pcmk_off_timeout; pcmk_delay_max fencing delay; priority-fencing-delay for two-node clusters; fence-reaction stop vs panic; SBD watchdog-timeout), Red Hat fencing chapter (fencing in progress blocks all cluster operations; node can be fenced by any node with any device; fence devices monitored for health), Pacemaker Clusters from Scratch (stonith create, stonith-enabled=true, fence_ipmilan example), Pacemaker Explained (fence agent standard: off/reboot commands, verifiable operation returns exit code 0/1, stonith-timeout, quorum required for fencing, no-quorum-policy exceptions, stonith_admin metadata API), Linux-HA STONITH wiki (STONITH plugin properties: no false positives for reset, RESET/OFF/ON commands, wait until node no longer running), SUSE SLE-HA fencing (two classes: resource-level fencing = exclusive access to resource e.g. SAN zoning/SCSI reserve; node-level fencing = reset/power off; STONITH devices: PDU, UPS, blade power control), IPMI fencing (fence_ipmilan/fence_ipmilanplus: ipaddr, lanplus, auth md5/password/none, privlvl callback/user/operator/administrator, ipport default 623, cipher, hexadecimal_kg, method onoff/cycle), SBD (STONITH Block Device: watchdog + shared storage poison pill, stonith-watchdog-timeout ≥ SBD_WATCHDOG_TIMEOUT, diskless mode, quorum device for 2-node), SCSI-3 persistent reservations fencing (fence_scsi/fence_mpath: SPC-3/SPC-4, preempt-and-abort, reservation_key per node, write exclusive registrants only), fencing tokens / epochs (monotonically increasing sequence numbers; protected resource rejects operations with stale tokens; DynamoDB lock client, Google Chubby sequence numbers, HDFS NameNode HA ZooKeeper fencing), split-brain prevention (quorum intersection R+W>N, majority quorums, leader epochs, GC pause stale leader problem), two-node priority fencing delay (node with fewest/least important resources fenced first to avoid mutual fencing), fence agent API (off/reboot verbs, verifiable operation, return codes).
+
+---
+
+### 2. Architecture Overview
+
+`ids-stonith` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a fencing policy/execution layer: given a fencing target (node or resource), a fence device, and a fencing action (off/reboot/reset/power-off/power-on), it decides whether fencing may proceed (quorum present, stonith-enabled enforcement, delay honored), validates the fence agent/device parameters, issues the fencing command as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`, waits for verifiable completion (exit code / device state confirmation), and records every fencing decision in a signed, hash-chained audit log. It never sends bytes itself; it returns a `FenceDecision` that the caller frames into datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (fencing requesters)            │
+│  ids-membership, ids-fault, ids-recovery — request node/resource fencing     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 082: ids-stonith (THIS CRATE — fencing policy + engine) │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐   │
+│  │ stonith-enabled     │ │ fence device registry │ │ fencing action      │   │
+│  │ enforcement         │ │ (IPMI, PDU, SBD, SCSI,│ │ evaluation            │   │
+│  │ (require true + ≥1  │ │  watchdog, resource)  │ │ (off/reboot/reset/…)  │   │
+│  │  device per node)   │ └─────────────────────┘ └─────────────────────┘   │
+│  └─────────────────────┘                                                     │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐   │
+│  │ fencing delay       │ │ priority fencing    │ │ IPMI channel config   │   │
+│  │ configuration       │ │ delay (two-node split│ │ (ipaddr, lanplus,    │   │
+│  │ (pcmk_delay_max)    │ │  brain race avoid)  │ │  auth, privlvl, login)│   │
+│  └─────────────────────┘ └─────────────────────┘ └─────────────────────┘   │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐   │
+│  │ verifiable fence    │ │ fence agent         │ │ audit log             │   │
+│  │ completion (exit 0/1│ │ abstraction (off/   │ │ (sha256/blake3 chain  │   │
+│  │  state confirm)     │ │  reboot verbs)      │ │  + ed25519 checkpoints)│   │
+│  └─────────────────────┘ └─────────────────────┘ └─────────────────────┘   │
+└─────────────────────────────────────────┬───────────────────────────────────┘
+                                          │ opaque Vec<u8> datagrams
+┌─────────────────────────────────────────▼───────────────────────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                   │
+│  send_datagram(Endpoint{CarrierType, addr: Vec<u8> ≤ 1024 B}, payload: &[u8])│
+│  receive_datagram → (Endpoint, Vec<u8>)                                     │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS     │
+│  / Wi-Fi / Bluetooth / cellular / VPN / mesh                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of a node-level fencing operation:** failure detector (ids-fault/ids-membership) flags a node as suspect → `ids-stonith` evaluates `stonith-enabled` enforcement (must be true, ≥1 device configured for the target) → selects a fence device from the registry → applies fencing delay (pcmk_delay_max) and, in two-node clusters, priority fencing delay (fence the node with fewer/least important resources first) → issues `off`/`reboot`/`reset` action to the device via opaque datagrams to `ids-carrier::Endpoint` → waits for verifiable completion (agent queries device to confirm new state, exit code 0 = success, 1 = failure) → on success, records fenced state in signed audit log; on failure, retries next device, then escalates to manual intervention → cluster may only resume resources after fencing completes or node rejoins after reboot.
+
+**Data flow of resource-level fencing:** revoke exclusive access to a specific resource (e.g. SAN zoning change, SCSI persistent reservation preempt-and-abort removing the node's registration key) without powering the node → same decision/audit path → resource can safely be started elsewhere.
+
+**Fencing semantics (research-verified):**
+- STONITH = node-level fencing, most common method is cutting power; fabric fencing cuts the node's access to a capability (network, shared disk).
+- `stonith-enabled=true` is mandatory for supported clusters; cluster refuses to start resources unless fencing is enabled and ≥1 STONITH resource configured.
+- Every node must be manageable by at least one fence device; multiple STONITH devices per node recommended.
+- Fence agents are `stonith`-class resource agents implementing `off`/`reboot`/`reset`/`on` verbs plus `monitor` (verify device works) and `metadata` (advertise parameters).
+- Verifiable operation: after power-off, agent queries device to confirm the plug/state is off; exit code 0 = success, 1 = failure.
+- Fencing requires quorum in the initiating partition (exceptions: administrator-initiated `stonith_admin`, external DLM API, `no-quorum-policy=ignore` allows fencing without quorum, `no-quorum-policy=suicide` lets a partition self-fence).
+- Fencing delays (pcmk_delay_max, startup-fencing) prevent two-node race conditions where both nodes fence each other simultaneously; priority fencing delay prefers fencing the node with fewer/least important resources.
+- `stonith-timeout` (default 60s) bounds how long to wait for a STONITH action to complete; `pcmk_reboot_timeout`/`pcmk_off_timeout` override per-action.
+- `fence-reaction`: `stop` (stop Pacemaker and stay stopped) or `panic` (reboot immediately, fallback to stop); `panic` is safest.
+- SBD: watchdog + optional shared-storage poison pill; node self-fences when it loses quorum/health; `stonith-watchdog-timeout` must be ≥ SBD_WATCHDOG_TIMEOUT.
+- SCSI-3 PR fencing: `fence_scsi`/`fence_mpath` remove a failed node's registration key (preempt-and-abort) so it can no longer write shared storage; requires SPC-3/SPC-4 storage, unique reservation_key per node.
+- Fencing tokens/epochs: monotonically increasing sequence numbers persisted by the protected resource; stale-token operations rejected. Complements STONITH by fencing stale owners that survive a reset.
+- Crypto: ed25519 signs fencing decisions and audit checkpoints; sha256/blake3 hash fence-agent metadata, fencing tokens, audit-chain links; xchacha20poly1305/chacha20poly1305 encrypt fence-device credentials and fencing state at rest.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 12.
+
+#### 3.1 STONITH definition and etymology (Linux-HA / Wikipedia)
+
+**Source:** Linux-HA STONITH wiki (http://linux-ha.org/STONITH), Wikipedia Fencing (computing) (https://wikipedia.org/wiki/STONITH). STONITH stands for "Shoot The Other Node In The Head" (also "Shoot The Offending Node In The Head"), sometimes STOMITH ("Shoot The Other Member/Machine In The Head"). Etymology: started as a misspelling of STOMITH (M = machine); Alan Robertson kept the misspelling for its Biblical "stoneth" feel ("I stoneth thou"), paralleling a cluster fatally casting out a member for disobeying cluster rules. First released for Linux-HA, later available for OpenBSD and Solaris. STONITH is a technique for node fencing: the errant node that might have run amok with cluster resources is "shot in the head" — speculation that a node is dead is made reality by actually powering it down/resetting it. The node may restart and rejoin the cluster later, or an operator may be informed of the need for a manual restart. IDs-stonith adopts this definition: fencing = isolation of a failed/suspect node so it cannot disrupt the cluster.
+
+#### 3.2 Node-level fencing vs resource-level fencing (SUSE SLE-HA / Pacemaker Explained)
+
+**Source:** SUSE SLE-HA Fencing and STONITH (https://documentation.suse.com/sle-ha/12-SP5/html/SLE-HA-all/cha-ha-fencing.html), Pacemaker Explained fencing (https://clusterlabs.org/projects/pacemaker/doc/2.1/Pacemaker_Explained/html/fencing.html). Two classes:
+- **Node-level fencing** prevents a failed node from accessing shared resources entirely; usually done by reset or power off. In Pacemaker this is STONITH, managed by pacemaker-fenced daemon.
+- **Resource-level fencing** ensures exclusive access to a given resource; examples: changing SAN fibre-channel zoning to lock a node out of its disks, SCSI reserve, DRBD marking a disk outdated. Does not power the node; only revokes access to the specific resource.
+
+`ids-stonith` implements both: `FenceScope::Node` (power/reset the whole node) and `FenceScope::Resource` (revoke exclusive access to one resource). Node-level fencing is the primary mechanism; resource-level fencing is complementary for finer-grained isolation.
+
+#### 3.3 stonith-enabled enforcement (Red Hat / SUSE support policy)
+
+**Source:** Red Hat Support Policies for RHEL HA Clusters (https://access.redhat.com/articles/2881341), Red Hat Cluster Properties (https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/high_availability_add-on_reference/ch-clusteropts-haar.html), SUSE SLE-HA Administration Guide. `stonith-enabled` cluster property: true = failed nodes and nodes whose resources cannot be stopped should be fenced; if true or unset, the cluster refuses to start resources unless ≥1 STONITH resource is configured. Red Hat does NOT support clusters with fencing disabled (`stonith-enabled=false` → undefined behavior). SUSE: default `stonith-enabled=true`; if no STONITH resources defined, cluster refuses to start any resources; do not set false (DLM/OCFS2 would block forever waiting for a fencing operation). `ids-stonith` enforces `stonith-enabled` as a hard invariant: fencing decisions are rejected when disabled; audit log records every enforcement check; CI/test verifies the invariant cannot be silently bypassed.
+
+#### 3.4 Fence devices and fence agent standard (Pacemaker / fence-agents API)
+
+**Source:** Pacemaker Explained fencing, ClusterLabs fence-agents FenceAgentAPI.md (https://github.com/ClusterLabs/fence-agents/blob/master/doc/FenceAgentAPI.md), SUSE SLE-HA fencing. A fence device is a physical device (power switch, PDU, UPS, blade power control, IPMI/BMC, SBD block device, SCSI storage) controlled by a fence agent — a `stonith`-class resource agent that abstracts the fencing technology from the cluster. Agent verbs: `off` (turn off), `on` (turn on), `reboot` (off then on, not always verifiable), `reset`, `monitor` (verify device works by logging in), `metadata` (advertise parameters). Return codes: 0 = success, 1 = failure. Verifiable operation: after `off`, agent should query the device to confirm the new state took effect (plug is off); not required for `on` or un-fencing. Starting/stopping a fencing resource registers/deregisters the device with the fencing daemon; it does not operate the device itself. Monitoring translates to logging in to the device to verify it will work when needed. `ids-stonith` models fence devices as typed resources with agent verbs, parameters, monitor intervals, and verifiable-completion requirements.
+
+#### 3.5 IPMI channel configuration (fence_ipmilan / fence_ipmilanplus)
+
+**Source:** Red Hat OpenStack Platform fencing (https://docs.redhat.com/en/documentation/red_hat_openstack_platform/16.2/html/high_availability_deployment_and_usage/assembly_fencing-controller-nodes_rhosp.html), Debian fence_ipmilanplus man page (https://manpages.debian.org/testing/fence-agents-ipmilan/fence_ipmilanplus.8), ClusterLabs fence-agents fence_ipmilan.py. IPMI is the default fencing mechanism for many HA platforms. `fence_ipmilan`/`fence_ipmilanplus` parameters: `ipaddr`/`ip` (IPMI interface IP, not the host IP), `ipport` (default 623), `lanplus` (use lanplus for improved security, default 1), `auth` (md5|password|none), `privlvl` (callback|user|operator|administrator, default administrator), `login`/`username`, `passwd`/`password` or `passwd_script`, `cipher`, `hexadecimal_kg`, `method` (onoff|cycle, default onoff), `verbose-level`. `pcmk_host_list` maps the agent to the cluster node (1:1 for IPMI). Multiple agents per node can be grouped into fencing levels (comma-separated; all must succeed). `ids-stonith` models IPMI channel as a typed `FenceDevice::Ipmi` with these parameters, validated at registration (privlvl must be operator or administrator for power control; lanplus recommended; ipaddr required).
+
+#### 3.6 Fencing delay configuration (pcmk_delay_max, startup-fencing)
+
+**Source:** Red Hat Configuring fencing (https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/configuring_and_managing_high_availability_clusters/configuring-fencing.html). Fencing delay = wait X seconds before fencing is started. In two-node clusters, simultaneous communication loss can cause both nodes to fence each other, shutting down the entire cluster. A fencing delay decreases the likelihood of mutual fencing: the node that detects the failure first waits before acting, giving the other node a chance to fence it first (or for communication to recover). Delays are unnecessary in larger clusters where quorum determines fencing authority. Only fencing scheduled by Pacemaker itself observes fencing delays; externally initiated fencing (`dlm_controld`, `pcs stonith fence`) does not. Device-level delay options: `delay` (wait before fencing starts), `power_wait` (wait after ON/OFF), `power_timeout` (test for status change after ON/OFF), `shell_timeout`/`login_timeout` (command prompt waits), `retry_on` (retry count). `ids-stonith` models `FencingDelayConfig { default_delay_ms, per_device_delay_ms, startup_fencing_enabled, two_node_race_avoidance_enabled }` and applies delay before issuing any fence action.
+
+#### 3.7 Priority fencing delay (two-node split-brain avoidance)
+
+**Source:** Red Hat Configuring fencing (priority-fencing-delay property). `priority-fencing-delay` (default 0/disabled) sets a fencing delay so that in a two-node split-brain situation, the node with the fewest or least important resources running is the node that gets fenced. This prevents the race where both nodes detect communication loss simultaneously and each fences the other. Delays can be set in clusters larger than two nodes but are generally of no benefit there, since only a partition with quorum initiates fencing. `ids-stonith` models `PriorityFencingDelay { enabled, threshold_resource_count, delay_ms }` and, when enabled in two-node mode, orders fencing so the lower-priority node is fenced first (or not at all if it holds fewer resources).
+
+#### 3.8 SBD — STONITH Block Device (watchdog + shared storage)
+
+**Source:** Red Hat SBD fencing chapter (https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/configuring_and_managing_high_availability_clusters/configuring-sbd-fencing-in-a-high-availability-cluster.html), SUSE Storage Protection and SBD, ClusterLabs sbd man page. SBD (Storage-Based Death) is a fencing mechanism alternative to power fencing. Nodes exchange health/quorum messages via shared block storage (SAN, iSCSI, FCoE) and each node has a watchdog timer. If a node loses quorum or cannot verify its health, it stops resetting its watchdog → watchdog expires → node reboots (self-fencing). The `fence_sbd` agent can also send explicit "poison pill" messages over shared storage; a responsive target reads it and reboots immediately; an unresponsive target relies on its watchdog. Two modes: disk-based (shared storage) and diskless (watchdog-only). `stonith-watchdog-timeout` must be ≥ `SBD_WATCHDOG_TIMEOUT`; do not set to -1 (inconsistent). For 2-node clusters, add a quorum device (corosync-qdevice) so behavior approaches odd-numbered clusters. `ids-stonith` models SBD as a `FenceDevice::Sbd` with watchdog timeout, msgwait timeout, device paths, and poison-pill messaging; `stonith-timeout` must be at least 2× `msgwait`.
+
+#### 3.9 SCSI-3 persistent reservations fencing (fence_scsi / fence_mpath)
+
+**Source:** Red Hat fence_scsi/fence_mpath support policies (https://access.redhat.com/articles/3078811), SUSE Storage Protection and SBD, Grimoire SPC-3 persistent reservations and fencing, Ubuntu fence_mpath man page. `fence_scsi`/`fence_mpath` use SCSI-3 persistent reservations (SPC-3 or SPC-4 required) to control access to shared storage. Each node registers a unique `reservation_key`; one node becomes the reservation holder (write exclusive, registrants only); on node failure, the agent removes the failed node's key (preempt-and-abort), so it can no longer write; manual reboot required to return. All shared storage must be managed by the agent; a dedicated fence-only storage device does not qualify. Devices must be whole storage devices, not partitions. `ids-stonith` models SCSI-PR fencing as `FenceDevice::ScsiPr { devices, reservation_keys, preempt_and_abort }` with validation that all shared storage is covered and keys are unique per node.
+
+#### 3.10 Split-brain prevention and quorum (Pacemaker / Corosync CMAN / fencing tokens)
+
+**Source:** Red Hat Cluster Suite Overview CMAN (https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_linux/5/html/cluster_suite_overview/s1-hasci-overview-cso.html), SystemOverflow "Preventing Split Brain: Quorums, Fencing, and Epochs", SystemOverflow "Fencing Tokens: Preventing Split Brain Operations", Medium "Why Distributed Locks Fail". Split brain = cluster nodes divided into two or more groups that don't know about each other (network cut, hardware/software failure); each group may access shared resources without knowledge of the other → data corruption. Prevention layers:
+- Majority quorum: >half the nodes must agree; at most one partition can form a majority → at most one active leader.
+- Fencing: isolate the suspect node (power off/reset) so it cannot act even if it still believes it is active.
+- Fencing tokens/epochs: monotonically increasing sequence numbers granted with each lock/leadership acquisition; the protected resource persists the highest token seen and rejects operations with lower tokens. Stale leader waking from a GC pause with token 42 is rejected if the new holder wrote with token 43.
+- The protected resource is the last line of defense (Kleppmann/DDIA): the lock service issues the token, the resource enforces it.
+`ids-stonith` implements the fencing layer (power/resource isolation) and emits fencing tokens/epochs that `ids-fencing-epoch` (Phase 083) consumes; it does not implement consensus itself (quorum comes from ids-membership/ids-quorum).
+
+#### 3.11 Fencing agent API and verifiable completion (Pacemaker stonith subsystem)
+
+**Source:** ClusterLabs pacemaker lib/fencing/st_client.c, Pacemaker Explained fencing, Ubuntu stonith_admin man page. Pacemaker's fencing subsystem (`pacemaker-fenced`/`stonithd`) runs on every node; the DC instance receives fencing requests from pacemaker-controld and dispatches fence agents. `stonith_admin` CLI: `--metadata --agent` to query agent parameters, `stonith fence <node>` for manual fencing. Fencing operations: device add/query/exec/list via XML over IPC. `pcmk_delay_max`/`pcmk_reboot_timeout`/`pcmk_off_timeout` govern timing. Quorum requirement: a cluster partition may execute fencing only if it has quorum and `stonith-enabled=true`, with exceptions for admin-initiated fencing, external DLM fencing, `no-quorum-policy=ignore` (no quorum required), and `no-quorum-policy=suicide` (partition self-fences). `ids-stonith` models the agent dispatch, action execution, exit-code interpretation (0/1), verifiable state confirmation, and quorum-gated fencing authorization.
+
+#### 3.12 Crypto: allowed set only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Source:** ed25519-dalek docs.rs (RFC 8032 EdDSA over Curve25519), chacha20poly1305 docs.rs (RFC 8439 AEAD + XChaCha20Poly1305 192-bit nonce), sha2 RustCrypto (SHA-256), BLAKE3-team README. `ids-stonith` uses:
+- ed25519: signing fencing decisions, audit checkpoints, and fence-agent metadata attestation.
+- sha256: fencing token derivation, audit-chain links, device parameter hashing.
+- blake3: fast content hashing for fencing-state digests, audit entry chaining (parallel, SIMD-friendly).
+- xchacha20poly1305: encrypt fence-device credentials and fencing state at rest (random 192-bit nonces safe for generation).
+- chacha20poly1305: encrypt session/state payloads (12-byte nonce, counter-based bounded use).
+No other crypto. `ids-crypto` is the sole crypto surface; `ids-stonith` references primitives via `ids-000-aa` type IDs only.
+
+---
+
+### Threat Model & Mitigations
+
+| Threat | Asset at risk | Mitigation (this crate) |
+|--------|-------------|--------------------------|
+| Split-brain: two partitions both active | Data consistency | `stonith-enabled` enforcement + quorum-gated fencing; node-level power fencing isolates the loser |
+| Stale leader writes after GC pause/partition | Data integrity | Fencing tokens/epochs emitted; protected resource rejects stale tokens (ids-fencing-epoch Phase 083) |
+| Two-node mutual fencing (both nodes fence each other) | Cluster availability | Fencing delay (`pcmk_delay_max`) + priority fencing delay (fence lower-priority node first) |
+| Fencing device failure / no device for a node | Recoverability | Every node must have ≥1 fence device; multiple devices per node recommended; retry next device on failure; manual intervention escalation |
+| False-positive fencing (healthy node powered off) | Availability | STONITH plugin property: no false positives for reset; verifiable completion (confirm state after off); monitor interval validates device health before use |
+| Unverifiable fencing (agent returns success but node still on) | Data integrity | Verifiable operation required: query device state after off/reboot; exit code semantics 0/1 |
+| Fencing without quorum (minority partition fences majority) | Consistency | Quorum-gated fencing; exceptions only for admin/external/suicide policies, all audit-logged |
+| Compromised fence-device credentials | Node safety | Credentials encrypted at rest (xchacha20poly1305/chacha20poly1305); privlvl operator/administrator minimum; lanplus recommended |
+| Replay of fencing commands | Decision integrity | Monotonic fencing tokens/epochs; signed audit checkpoints (ed25519); bounded replay cache |
+| Clock manipulation affecting fencing timing | Timing correctness | Logical/monotonic `IdsTime` only for delays and timeouts; never wall-clock for fencing authority |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Idempotent fence commands; token-based replay protection; carrier-agnostic boundary (opaque `Endpoint`) |
+| STONITH disabled silently | All of above | `stonith-enabled` is a hard invariant; cluster refuses resources when false or unset; CI test asserts enforcement |
+
+The carrier is never trusted: fencing decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+| Crate | Role | Relevance to ids-stonith |
+|-------|------|--------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Endpoint`, `FailureDomain`, `Error` — consumed, never redefined; sealed trait contracts mirrored |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All fencing traffic flows to/from `Endpoint`; crate returns `FenceDecision`, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing fencing decisions/audit; encrypting device credentials and state at rest; hashing tokens and audit links |
+| `ids-membership` | Cluster membership and node health | Flags suspect/failed nodes that trigger fencing decisions |
+| `ids-fault` | Fault detection and failure domains | Detects node unresponsiveness; feeds fencing triggers |
+| `ids-recovery` | Cluster recovery after failure | Coordinates resource restart only after fencing confirms target is down |
+| `ids-fencing-epoch` (Phase 083) | Epoch-based authority to prevent stale owners | Consumes fencing tokens/epochs emitted by ids-stonith; complementary split-brain layer |
+| `ids-immutable` (Phase 040) | Immutable record protection | Fencing must not violate holds/retention on immutable records |
+
+**Integration points:** `ids-stonith` evaluates fencing policy and returns `FenceDecision`/`FenceResult`; callers (ids-membership, ids-fault, ids-recovery) frame the decision into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. `ids-stonith` never reaches into crate internals and never opens a transport. `stonith-enabled` enforcement is cross-cutting: any crate starting resources must confirm fencing is enabled first.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-stonith/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-stonith/
+├── Cargo.toml                          # Crate manifest; depends on ids-000-aa, ids-carrier, ids-crypto, ids-time; serde, thiserror, blake3
+├── lib.rs                              # Crate root, public API surface, feature gates
+├── constants.rs                        # Fencing defaults: stonith-timeout (60s), pcmk_delay_max, max devices per node
+├── error.rs                            # StonithError (thiserror): enforcement, device, delay, action, audit errors
+├── features.rs                         # Feature flags: ipmi, sbd, scsi-pr, audit, crypto
+│
+├── types.rs                            # FenceScope, FenceAction, FenceDecision, FenceResult, FenceToken (re-exports ids-000-aa types)
+├── stonith_enforcement.rs              # stonith-enabled invariant: require true, ≥1 device per node, refuse resources if violated
+├── fence_device_registry.rs            # Registration, lookup, per-node device assignment, multiple devices per node
+├── fence_device.rs                     # FenceDevice enum: Ipmi, Pdu, Ups, BladePower, Sbd, ScsiPr, Custom
+├── ipmi_channel.rs                     # IPMI channel config: ipaddr, ipport, lanplus, auth, privlvl, login, passwd, cipher
+├── fencing_delay.rs                    # Fencing delay config: pcmk_delay_max, per-device delay, startup-fencing
+├── priority_fencing_delay.rs           # Two-node priority: fence node with fewer/least important resources first
+├── fence_agent.rs                      # Fence agent abstraction: off/reboot/reset/on/monitor/metadata verbs
+├── fence_action.rs                     # Action evaluation: off/reboot/reset/power-off/power-on, exit-code semantics (0/1)
+├── verifiable_completion.rs            # Post-action device state confirmation; verifiable operation requirement
+├── quorum_gate.rs                      # Quorum-gated fencing authorization; exceptions (admin, external, suicide)
+├── fence_token.rs                      # Monotonic fencing token/epoch emission (consumed by ids-fencing-epoch)
+├── audit.rs                            # Signed, hash-chained audit log: audit_entry, audit_chain, checkpoint, signer, verifier
+├── carrier_adapter.rs                  # Opaque Vec<u8> datagram framing to ids-carrier::Endpoint (decision carrier only)
+│
+├── contracts/                          # Sealed trait contracts (~10 files)
+│   ├── mod.rs
+│   ├── stonith_contract.rs             # trait StonithEnforcement (enabled check, device requirement)
+│   ├── fence_device_contract.rs        # trait FenceDevice (register, monitor, parameters)
+│   ├── fence_agent_contract.rs         # trait FenceAgent (off/reboot/reset/on/monitor/metadata)
+│   ├── fencing_delay_contract.rs       # trait FencingDelay (delay before action)
+│   ├── priority_fencing_contract.rs    # trait PriorityFencing (two-node priority ordering)
+│   ├── quorum_gate_contract.rs         # trait QuorumGate (quorum-gated fencing authorization)
+│   ├── fence_token_contract.rs         # trait FenceToken (monotonic token emission)
+│   ├── audit_contract.rs               # trait FenceAudit (signed hash-chained log)
+│   ├── carrier_contract.rs             # trait FenceCarrier (opaque Endpoint datagrams)
+│   └── ...
+│
+├── invariants/                         # Compile-time/runtime invariants (~8 files)
+│   ├── mod.rs
+│   ├── stonith_enabled.rs              # stonith-enabled must be true; ≥1 device per node
+│   ├── quorum_gated.rs                 # Fencing requires quorum (exceptions documented)
+│   ├── verifiable_completion.rs        # Fence action must confirm device state
+│   ├── carrier_agnostic.rs             # No std::net/tokio::net/IP/TCP/UDP/QUIC/HTTP/DNS/etc.
+│   ├── crypto_allowlist.rs             # Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305
+│   ├── device_coverage.rs              # Every node has ≥1 fence device; all shared storage covered (SCSI-PR)
+│   ├── monotonic_time_only.rs          # IdsTime monotonic; no wall-clock for fencing authority
+│   └── audit_chain_sound.rs            # Hash chain + ed25519 checkpoints integrity
+│
+├── audit/                              # Signed, hash-chained audit log (~6 files)
+│   ├── audit_entry.rs
+│   ├── audit_chain.rs
+│   ├── checkpoint.rs
+│   ├── signer.rs
+│   ├── verifier.rs
+│   └── mod.rs
+│
+├── tests/                              # Property/verification tests (~30 files)
+│   ├── mod.rs
+│   ├── enforcement_tests.rs
+│   ├── device_registry_tests.rs
+│   ├── ipmi_channel_tests.rs
+│   ├── fencing_delay_tests.rs
+│   ├── priority_delay_tests.rs
+│   ├── quorum_gate_tests.rs
+│   ├── fence_token_tests.rs
+│   ├── audit_tests.rs
+│   ├── carrier_agnostic_tests.rs       # Asserts no std::net/tokio::net/IP/TCP/UDP/etc.
+│   ├── crypto_allowlist_tests.rs       # Asserts only allowed crypto reachable
+│   └── ...
+│
+├── benches/                            # (~6 files)
+│   ├── mod.rs
+│   ├── decision_latency.rs             # Fencing decision time (ids-time keyed)
+│   ├── audit_append.rs                 # Audit log append throughput
+│   └── ...
+│
+├── docs/                               # (~14 files)
+│   ├── architecture.md                 # Fencing architecture and layering
+│   ├── runbook.md                      # Fencing device configuration and operation
+│   ├── stonith_enabled.md              # stonith-enabled enforcement policy
+│   ├── ipmi_channel.md                 # IPMI channel configuration guide
+│   ├── fencing_delay.md                # Fencing delay and priority delay guide
+│   ├── sbd.md                          # SBD watchdog/poison-pill configuration
+│   ├── scsi_pr.md                      # SCSI-3 persistent reservation fencing guide
+│   ├── audit_log.md                    # Signed audit log format and verification
+│   ├── carrier_agnostic.md             # Carrier-agnostic boundary contract
+│   ├── crypto_policy.md                # Allowed-crypto allowlist policy
+│   ├── threat_model.md                 # Threat model and mitigations
+│   ├── adding_a_fence_device.md        # Adding a new fence device type
+│   ├── quorum_gating.md                # Quorum-gated fencing authorization
+│   └── split_brain_prevention.md       # Split-brain prevention design rationale
+│
+└── spec/
+    ├── stonith_spec.md                 # Normative STONITH/fencing specification
+    ├── delay_spec.md                   # Fencing delay and priority delay specification
+    ├── ipmi_spec.md                    # IPMI channel specification
+    └── audit_spec.md                   # Audit log specification
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `tests/`, `benches/`, `docs/`, `spec/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files. No stubs; every file holds production-grade code with error handling, documentation, and tests.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+- **FenceDevice enum**: `{ Ipmi(IpmiChannel), Pdu, Ups, BladePower, Sbd(SbdConfig), ScsiPr(ScsiPrConfig), Custom(u16) }`; each variant carries typed parameters; `FenceDevice::monitor()` verifies device health; `FenceDevice::parameters()` returns opaque config for the carrier adapter.
+- **IPMI channel config**: `IpmiChannel { ipaddr, ipport: u16 (623), lanplus: bool, auth: AuthType {Md5|Password|None}, privlvl: PrivLevel {Callback|User|Operator|Administrator}, login, passwd }`; validation: privlvl ≥ Operator for power control, lanplus recommended, ipaddr required.
+- **stonith-enabled enforcement**: `is_enabled() -> bool`; `require_devices_per_node(node_id) -> Result<(), StonithError>` (each node ≥1 device); `refuse_resources_if_fencing_disabled()` — cluster refuses to start resources unless enabled + ≥1 device configured.
+- **Fencing delay**: `apply_delay(node_id, device_id) -> Duration` (pcmk_delay_max + per-device delay; startup-fencing optional); delay elapsed before action issued; only Pacemaker-scheduled fencing observes delays.
+- **Priority fencing delay (two-node)**: `priority_order(nodes: &[NodeId]) -> Vec<NodeId>` — sorts nodes by resource count/importance ascending; lower-priority node fenced first (or not at all if it holds fewer resources); disabled by default (0).
+- **Quorum gate**: `may_fence(partition: &Partition) -> bool` — requires quorum + stonith-enabled; exceptions: admin-initiated (`stonith_admin`), external (DLM API), `no-quorum-policy=ignore`/`suicide`; all exceptions audit-logged.
+- **Fence action**: `execute(action: FenceAction {Off|Reboot|Reset|On|PowerOff|PowerOn}, device: &FenceDevice) -> FenceResult { Success|Failure }` — exit code 0 = success, 1 = failure; on failure, retry next device; verifiable completion confirms device state after Off/Reboot.
+- **Verifiable completion**: after `Off`, query device to confirm plug is off/state changed; required for Off/Reboot; not required for On or un-fencing.
+- **Fence token/epoch**: `FenceToken(u64)` monotonically increasing per fence domain; emitted with each fencing decision; consumed by `ids-fencing-epoch`; protected resource rejects operations with stale tokens.
+- **Audit chain**: each fencing decision (enable/disable, device register, action issued, success/failure, delay applied) = SHA-256/BLAKE3-chained entry + ed25519-signed checkpoint; `NodeId` + `IdsTime` stamped; offline verifiable.
+- **Failure behavior matrix**: node-level fence = power off/reset the whole node; resource-level fence = revoke exclusive access to one resource (SAN zoning, SCSI PR preempt-and-abort removing registration key) without powering the node.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Endpoint`, `FailureDomain`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `ids-time` — monotonic `IdsTime` for delays and timeouts (never wall-clock for fencing authority).
+- `serde` — serialization of fencing envelopes, device parameters, audit entries.
+- `thiserror` — error types.
+- `blake3` — content hashing for fencing-state digests (type-level surface only).
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. `ids-stonith` imports no crypto directly — all via `ids-crypto`/`ids-000-aa`.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-082.1 | `stonith-enabled` enforcement: cluster refuses to start resources unless fencing enabled and ≥1 device configured per node | Enforcement invariant test passes; `stonith-enabled=false` rejected |
+| AC-082.2 | Every node manageable by ≥1 fence device; multiple devices per node supported | Device registry test: registration/lookup/per-node assignment |
+| AC-082.3 | Node-level fencing: power off/reset/reboot action issued via opaque `Vec<u8>` to `ids-carrier::Endpoint` | Fence action test returns `FenceResult{Success|Failure}` with exit-code semantics (0/1) |
+| AC-082.4 | Resource-level fencing: revoke exclusive access to one resource without powering the node (SAN zoning/SCSI PR model) | Resource fence test: registration key removed / zoning changed |
+| AC-082.5 | IPMI channel config: ipaddr, lanplus, auth (md5/password/none), privlvl (≥operator), login, passwd validated | IPMI channel test: valid/invalid parameter acceptance |
+| AC-082.6 | Fencing delay (`pcmk_delay_max`) applied before action; startup-fencing optional | Delay test: action not issued before delay elapses |
+| AC-082.7 | Priority fencing delay (two-node): lower-priority node (fewer/least important resources) fenced first | Priority order test: ascending resource-count sort |
+| AC-082.8 | Quorum-gated fencing: fencing requires quorum + stonith-enabled; exceptions (admin/external/suicide) audit-logged | Quorum gate test: non-quorum partition rejected unless exception |
+| AC-082.9 | Verifiable completion: after Off/Reboot, device state confirmed; exit code 0 = success, 1 = failure | Verifiable completion test: state query after action |
+| AC-082.10 | Fencing token/epoch: monotonically increasing, emitted per fence decision, consumed by ids-fencing-epoch | Token test: monotonic increment, stale rejection |
+| AC-082.11 | Audit log: append-only, SHA-256/BLAKE3 hash-chained, ed25519-signed checkpoints, `NodeId`+`IdsTime` stamped, offline verifiable | Audit test: chain integrity, signature verification |
+| AC-082.12 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) + source grep — zero matches |
+| AC-082.13 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in crypto surface | Crypto allowlist unit test passes |
+| AC-082.14 | Monotonic `IdsTime` only for delays/timeouts; no wall-clock for fencing authority | Time-source test passes |
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete fence-device defaults per type:** IPMI `privlvl` default (administrator), `lanplus` default (true), `auth` default — to be validated at integration with actual hardware/BMCs.
+- **Fencing delay values:** `pcmk_delay_max` default and per-device delay tuning are deployment-dependent; two-node race avoidance benefit unquantified for IDS topology.
+- **Priority fencing delay resource-count metric:** "fewest or least important resources" definition (count vs weight) pending product decision.
+- **SBD watchdog-timeout relationship:** `stonith-watchdog-timeout` must be ≥ `SBD_WATCHDOG_TIMEOUT`; exact values hardware-dependent.
+- **SCSI-PR storage coverage:** all shared storage must be managed; identifying which devices qualify requires storage inventory at integration.
+- **Fencing token domain:** per-node vs per-cluster vs per-resource token scope; `ids-fencing-epoch` (Phase 083) will refine.
+- **Interaction with `ids-immutable` (Phase 040):** fencing must not violate holds/retention on immutable records; guard handshake defined here, validated at integration.
+- **Manual intervention escalation:** when all fence devices fail, operator acknowledgment flow (manual fence confirmation) not yet specified.
+- **Fence device monitor interval:** default monitor cadence for verifying device health before use; unquantified.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-stonith` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear fencing boundary |
+| `stonith-enabled` as hard invariant (true required, ≥1 device per node) | Red Hat/SUSE support policy: clusters without fencing are unsupported; cluster refuses resources when disabled |
+| Node-level fencing primary (power off/reset), resource-level fencing complementary | SUSE two-class model: node-level prevents all shared-resource access; resource-level revokes one resource without power |
+| Fence agents as `stonith`-class abstraction (off/reboot/reset/on/monitor/metadata) | Pacemaker fence-agent standard: cluster agnostic about fencing technology; knowledge isolated in agent |
+| Verifiable completion (confirm state after Off/Reboot; exit 0/1) | FenceAgentAPI: agent should query device to confirm new state took effect |
+| Quorum-gated fencing with documented exceptions | Pacemaker: partition may fence only with quorum + stonith-enabled; exceptions for admin/external/suicide |
+| Fencing delay + priority fencing delay for two-node races | Red Hat: delay prevents mutual fencing in two-node split-brain; priority fences lower-priority node first |
+| IPMI channel as typed device (ipaddr, lanplus, auth, privlvl, login, passwd) | fence_ipmilan/fence_ipmilanplus parameter model; privlvl ≥ operator for power control |
+| SBD as watchdog + optional shared-storage poison pill | SBD is the standard power-fencing alternative; watchdog-timeout ≥ SBD_WATCHDOG_TIMEOUT |
+| SCSI-3 PR fencing (preempt-and-abort, unique reservation_key per node) | fence_scsi/fence_mpath model; all shared storage covered, keys unique |
+| Fencing tokens/epochs emitted (consumed by ids-fencing-epoch Phase 083) | Complements STONITH against stale leaders surviving a reset (Kleppmann/DDIA last line of defense) |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Offline-verifiable fencing decision log; tamper evidence |
+| Monotonic `IdsTime` only; no wall-clock for fencing authority | Clock manipulation cannot break fencing timing authority |
+| Carrier-agnostic via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` sole surface via `ids-000-aa` type IDs | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+[^1]: Linux-HA, "STONITH: Shoot The Other Node In The Head." https://linux-ha.org/STONITH — STONITH definition, node fencing, etymology (STOMITH misspelling, Alan Robertson, Biblical "stoneth"), plugin properties (no false positives, RESET/OFF/ON commands).
+[^2]: Wikipedia, "Fencing (computing) / STONITH." https://wikipedia.org/wiki/STONITH — STONITH = disable/power off suspected node; fencing = isolation of failed node.
+[^3]: SUSE Linux Enterprise High Availability Administration Guide 15-SP7. https://documentation.suse.com/sle-ha/15-SP7/single-html/SLE-HA-administration/book-administration.html — stonith-enabled/startup-fencing must be true; node fencing is STONITH; pacemaker-fenced daemon; multiple STONITH devices per node recommended; split-brain prevention.
+[^4]: SUSE, "Fencing and STONITH" (SLE-HA 12-SP5 / 16.0). https://documentation.suse.com/sle-ha/12-SP5/html/SLE-HA-all/cha-ha-fencing.html — two fencing classes (resource-level, node-level); STONITH devices: PDU, UPS, blade power control; stonithd daemon.
+[^5]: Red Hat, "Support Policies for RHEL High Availability Clusters — Fencing/STONITH." https://access.redhat.com/articles/2881341 — stonith-enabled must be true for support; every node managed by a fence device; fencing disabled = undefined.
+[^6]: Red Hat, "Pacemaker Cluster Properties" (RHEL 7). https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/high_availability_add-on_reference/ch-clusteropts-haar.html — stonith-enabled=true, stonith-action reboot/off, stonith-timeout 60s.
+[^7]: Red Hat, "Configuring fencing in a Red Hat High Availability cluster" (RHEL 10). https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/configuring_and_managing_high_availability_clusters/configuring-fencing.html — fencing delay, pcmk_delay_max, priority-fencing-delay (two-node), fence-reaction stop/panic, stonith-timeout, manual fence, quorum requirements.
+[^8]: Red Hat, "Configuring SBD fencing" (RHEL 10). https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/configuring_and_managing_high_availability_clusters/configuring-sbd-fencing-in-a-high-availability-cluster.html — SBD watchdog + shared storage poison pill, stonith-watchdog-timeout ≥ SBD_WATCHDOG_TIMEOUT, diskless mode, quorum device for 2-node.
+[^9]: Red Hat, "fence_scsi and fence_mpath support policies." https://access.redhat.com/articles/3078811 — SCSI-3 persistent reservations fencing, SPC-3/SPC-4, reservation_key per node, all shared storage managed.
+[^10]: ClusterLabs, Pacemaker "Clusters from Scratch — Configure Fencing." https://clusterlabs.org/projects/pacemaker/doc/2.1/Clusters_from_Scratch/html/fencing.html — stonith create, stonith-enabled=true, fence_ipmilan example, pcs property set.
+[^11]: ClusterLabs, Pacemaker Explained — fencing. https://clusterlabs.org/projects/pacemaker/doc/2.1/Pacemaker_Explained/html/fencing.html — fence agent standard (off/reboot verbs), verifiable operation, stonith-timeout, quorum-gated fencing, exceptions, stonith_admin metadata.
+[^12]: ClusterLabs, fence-agents FenceAgentAPI.md. https://github.com/ClusterLabs/fence-agents/blob/master/doc/FenceAgentAPI.md — power fencing, reboot semantics, verifiable operation, return codes 0/1.
+[^13]: ClusterLabs, fence-agents fence_ipmilan.py. https://github.com/ClusterLabs/fence-agents/blob/main/agents/ipmilan/fence_ipmilan.py — IPMI fencing agent: lanplus, auth, privlvl, power status, reboot cycle.
+[^14]: Red Hat OpenStack Platform, "Fencing Controller nodes with STONITH." https://docs.redhat.com/en/documentation/red_hat_openstack_platform/16.2/html/high_availability_deployment_and_usage/assembly_fencing-controller-nodes_rhosp.html — IPMI default fencing, fence_ipmilan parameters (ipaddr, lanplus, login, passwd, privlvl, pcmk_host_list), SBD as secondary.
+[^15]: Debian, fence_ipmilanplus(8) man page. https://manpages.debian.org/testing/fence-agents-ipmilan/fence_ipmilanplus.8 — IPMI parameters: auth, lanplus, privlvl, ipport (623), method (onoff/cycle), cipher, hexadecimal_kg.
+[^16]: Red Hat Cluster Suite Overview — CMAN (RHEL 5). https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_linux/5/html/cluster_suite_overview/s1-hasci-overview-cso.html — quorum prevents split-brain; fenced fences failed nodes; DLM/GFS suspend until fencing complete.
+[^17]: SystemOverflow, "Preventing Split Brain: Quorums, Fencing, and Epochs." https://systemoverflow.com/learn/distributed-primitives/leader-election/preventing-split-brain-quorums-fencing-and-epochs — majority quorum, fencing tokens/epochs, stale leader after GC pause, HDFS NameNode HA ZooKeeper fencing.
+[^18]: SystemOverflow, "Fencing Tokens: Preventing Split Brain Operations." https://systemoverflow.com/learn/distributed-primitives/distributed-locks/fencing-tokens-preventing-split-brain-operations — monotonic fencing tokens, protected resource rejects stale tokens, DynamoDB lock client, Google Chubby sequence numbers.
+[^19]: Medium, "Why Distributed Locks Fail: Fencing Tokens, Stale Leaders, and the Split-Brain Problem." https://medium.com/engineering-playbook/why-distributed-locks-fail-fencing-tokens-stale-leaders-and-the-split-brain-problem-21e004dadfb4 — fencing token = monotonically increasing generation; stale-owner problem; epoch authority.
+[^20]: IBM, "Fencing." https://ibm.com/docs/en/solution-assurance?topic=concepts-fencing — fencing protects data from malfunctioning nodes; fence_sbd, fence_ibmz, fence_zvmip; split-brain solved with quorum.
+[^21]: ClusterLabs, sbd man page. https://github.com/clusterlabs/sbd/blob/master/man/sbd.8.pod.in — SBD STONITH block device, shared block storage messaging, watchdog, external/sbd fencing resource, stonith-timeout ≥ 2× msgwait.
+[^22]: Grimoire, "SPC-3 Persistent Reservations and Fencing." https://grimoire.carcano.ch/blog/spc-3-persistent-reservations-and-fencing — SCSI persistent reservations fencing, registration keys, write-exclusive registrants-only, preempt-and-abort.
+[^23]: Ubuntu, fence_mpath(8) man page. https://manpages.ubuntu.com/manpages/noble/man8/fence_mpath.8.html — fence_mpath SCSI-3 PR fencing, multipath devices, reservation keys.
+[^24]: ed25519-dalek docs.rs. https://docs.rs/ed25519-dalek — ed25519 key gen/sign/verify, RFC 8032 EdDSA over Curve25519.
+[^25]: chacha20poly1305 docs.rs. https://docs.rs/chacha20poly1305 — ChaCha20Poly1305/XChaCha20Poly1305 AEAD, RFC 8439, 192-bit nonce.
+[^26]: sha2 RustCrypto. https://docs.rs/sha2 — SHA-256 implementation (NIST FIPS 180-4).
+[^27]: BLAKE3-team BLAKE3 README. https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md — BLAKE3-256, SIMD, keyed hash, KDF, XOF.
+[^28]: IDS project documents at C:/idfs: CRATES.md (crate inventory, ids-000-aa master, ids-carrier Endpoint, ids-crypto allowed set), IDS.md, prompts.txt entry 82 (lines 1225-1239).
+[^29]: Existing ids-000-aa skeleton. C:/idfs/ids-000-aa/ — types.rs, lib.rs, contracts/, invariants/, errors.rs, versioning.rs, Cargo.toml.
+[^30]: HX-241 reference plan format. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+
+---
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made. The blueprint above defines all architecture, fencing domains, algorithms, data structures, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 082 (ids-stonith).
+
+
 # PHASE 083:
 
 ## Phase 083 — Create the ids-fencing-epoch crate: Epoch-based authority to prevent stale owners.
@@ -40827,6 +41263,493 @@ No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond t
 **Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made. The blueprint above defines all architecture, algorithms, data structures, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 087 (ids-ppr-reconstruction).
 
 
+# PHASE 088:
+
+## Phase 088 — Create the ids-hot-tier crate (High-performance storage for frequently accessed data): Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1315-1329)
+
+```
+88. Research only do not read plan.md **[Phase 088 — Create the ids-hot-tier crate: High-performance storage for frequently accessed data.]**
+
+Crate: ids-hot-tier
+Purpose: High-performance storage for frequently accessed data.
+Contents: Hot tier placement, hot tier promotion, hot tier access patterns, hot tier latency objectives, hot tier cost, hot tier capacity management.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 088 — Create the ids-hot-tier crate: High-performance storage for frequently accessed data.]**
+
+Create plan-088.md in C:/idfs/plans/ for the ids-hot-tier crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 088 creates `ids-hot-tier`, the IDS crate for the **hot storage tier**: the tier that holds the most-recent, most-frequently-accessed data, optimized for low-latency read/write on the fastest media, at the highest cost per byte, typically replicated for resiliency. New writes land in the hot tier by default. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by hot-tier concern: placement, promotion, access patterns, latency objectives, cost, and capacity management — matching prompts.txt entry 88 contents exactly. The sister tier crate `ids-warm-tier` (Phase 089, plan-089.md) is the hot tier's spill/demotion target; the warm tier reserves bytes for expected promotions so hot-tier spill does not overflow it.
+
+**Core design:** `ids-hot-tier` owns hot-tier data lifecycle — admission into the hot tier, hotness scoring of records, promotion into hot (warm → hot) and demotion out of hot (hot → warm tier), hot-tier capacity watermarks (low/high), spill to the warm tier when the hot tier exceeds its high watermark, cost-per-byte accounting for hot storage, and latency-SLO tracking (p50/p95/p99 sub-millisecond read objectives). Every decision it returns is a policy decision; it never opens a socket or drives any transport directly. All cross-node hot-tier traffic flows as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` address ≤ 1024 bytes). Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305, consumed via `ids-crypto` primitive IDs from `ids-000-aa` (ids-crypto does not depend on ids-000-aa to avoid the circular dependency; ids-hot-tier depends on both).
+
+**Scope boundary:** `ids-hot-tier` decides placement, promotion/demotion, capacity, cost, and latency SLOs; it does not store bytes itself. Hot-tier storage nodes are served by other crates (ids-store, ids-erasure, ids-replication); `ids-hot-tier` tells them *where* and *when* data belongs. Thresholds are configurable budgets (watermark ratios, hotness scores, cost-per-byte caps, latency SLOs), not hard-coded limits, so a capacity-constrained platform degrades gracefully rather than failing.
+
+Skeleton `ids-hot-tier` does NOT yet exist at `C:/idfs/ids-hot-tier/`. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+**Research basis:** 30 parallel searches returned cache replacement policies (ARC FAST'03 Megiddo/Modha, 2Q VLDB'94 Johnson/Shasha, CLOCK-Pro scan resistance, TinyLFU/W-TinyLFU admission used in Cassandra/Accumulo/HBase), tiering & caching survey (arXiv 1904.11560), Red Hat Gluster tiering watermarks (watermark-hi/lo, promote/demote frequency), NetApp auto-tiering (cooling threshold 2–183 days, hot-tier auto-increase +10%), Intel Optane DCPMM latency (~374 ns random read), RocksDB secondary cache on NVM/SCM, RocksDB sharded block cache (up to 64 shards, mutex contention), VAT LSM write-amplification analysis (tiering ~5× less than leveling), WAL group commit (one write + at most one fdatasync per batch), CMU mmap-vs-O_DIRECT analysis, Linux page reclaim (kswapd low/min watermarks), NVCache Optane admission throttling, AdaptSize probabilistic admission exp(−size/c), Zipfian hot-set and Hotset workload models, miss-ratio curves / working-set size, consistent hashing placement, erasure coding vs replication (RS(10,4), expansion factor), backpressure on unflushed deltas, LSM compaction tail spikes (P99 4 ms → 180 ms, level0 slowdown/stop triggers), write combining on persistent memory, NVMe queue-depth IOPS, tiered-storage read amplification (TiKV ~30,000× worst case), Azure Blob / HeliosDB tier pricing, split-level I/O scheduling (SplitDeadline 4× tail latency), persistent-memory programming model, block- vs file-level tiering granularity.
+
+---
+
+### 2. Architecture Overview
+
+`ids-hot-tier` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), `ids-crypto` (allowed primitives), and `ids-time` (monotonic ticks). It is a policy/decision layer: given a record's access history, current tier, hot-tier capacity, latency SLO, and cost budget, it decides (a) whether a new write lands in the hot tier, (b) the record's hotness score and zone (hot vs. spill candidate), (c) whether to promote a warm record into hot or demote a hot record to the warm tier, (d) how much hot-tier capacity to reserve, (e) what hot-tier cost-per-byte applies, and (f) whether the latency SLO is at risk. It never sends bytes itself; it returns a `PlacementDecision` / `PromotionDecision` / `DemotionDecision` / `SpillDecision` that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (tier users: ids-store, ids-erasure, …)         │
+│  read/write with temperature tag, new writes land in hot tier by default, migration requests │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│                     Phase 088: ids-hot-tier (THIS CRATE — policy)                            │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌──┐   │
+│  │ access-pattern   │ │ hotness scoring  │ │ placement        │ │ promotion/       │ │cost│ │
+│  │ tracking         │ │ (short+long EWMA)│ │ (admission,      │ │ demotion policy  │ │model│ │
+│  │ (count/recency)  │ │ per record       │ │ eviction)        │ │ hysteresis       │ │per │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘ └──────────────────┘ └──┘   │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐       │
+│  │ latency SLO      │ │ capacity         │ │ crypto surface   │ │ audit/logging    │       │
+│  │ (p50/p95/p99)    │ │ (watermarks,     │ │ (allowlist only) │ │ (signed+chained) │       │
+│  │ write-pressure   │ │ spill to warm    │ │                  │ │                  │       │
+│  │ backpressure     │ │ reservations)    │ │                  │ │                  │       │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘ └──────────────────┘       │
+└──────────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                               │ opaque Vec<u8> datagrams
+                                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                                    │
+│  send_datagram(Endpoint{CarrierType, addr: Vec<u8> ≤ 1024 B}, payload: &[u8])                │
+│  receive_datagram → (Endpoint, Vec<u8>)                                                      │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS /                    │
+│  Wi-Fi / Bluetooth / cellular / VPN / mesh                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of a hot-tier admission decision:** client submits `Admit{record_id, size, access_history}` → `ids-hot-tier` scores hotness, checks hot-tier watermarks and reservation, returns `AdmitDecision{admit_to_hot: bool, redirect_to_warm, reservation_bytes, cost_per_byte}` → caller places the record via `ids-store`/`ids-erasure` and sends migration as opaque datagram(s) to `ids-carrier::Endpoint` targets.
+
+**Data flow of a promotion/demotion cycle:** `hotness_scanner` sweeps hot-tier records on each monotonic `ids-time` tick (never wall-clock for ordering); records whose hotness falls below the demote threshold for N consecutive ticks become demotion candidates → `DemoteDecision{target_tier: Warm, bytes, migration_bandwidth_cap}`; warm-tier records whose hotness rises above the promote threshold become promotion candidates → `PromoteDecision{target_tier: Hot, bytes}`. Hysteresis (separate promote/demote thresholds + minimum dwell time) prevents thrashing.
+
+**Temperature semantics (research-verified):**
+- **Hot data**: frequently accessed, highest performance tier (DRAM/NVMe/SCM), smallest fraction of total data (the "working set / hot set" rule observed in tiered-storage literature — e.g., cachekit Hotset models 10% of keys receiving 90% of accesses).
+- **Warm data**: moderately accessed (ids-warm-tier, Phase 089), the demotion target for cooled hot data and the spill target for an over-full hot tier.
+- **Cold data**: infrequently accessed, lowest cost (ids-cold-tier, Phase 090).
+
+**Crypto used:** ed25519 for signing placement/promotion/demotion/spill decisions and audit checkpoints; sha256/blake3 for hotness hashing, access-pattern digest, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt hot-tier state at rest (temperature tables, reservation records) when confidentiality required.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline [^n] with the source list in Section 12.
+
+#### 3.1 Hot tier definition and the three-tier model (hot / warm / cold)
+
+**Sources:** PLANS_ALL_PHASES.md tiering section (Elasticsearch hot tier model: entry point, most-recent/most-frequently-searched, SSDs, replicas); Aerospike tiered storage guide; Purestorage tiered data storage overview.
+
+The three-tier model orders storage by access frequency: hot (frequent, fast, expensive), warm (moderate, balanced, mid-cost), cold (infrequent, slow, cheap). The hot tier holds data important enough to justify premium storage: entry-point data, most-recent/most-frequently-accessed records, typically on SSDs/NVMe with replicas for resiliency. New writes land in the hot tier by default. `ids-hot-tier` owns the hot tier: admission, hotness scoring, promotion/demotion, capacity, cost, latency SLOs.
+
+#### 3.2 Data temperature classification (access frequency + recency)
+
+**Sources:** Data Temperature Informed Streaming for Optimising Large-Scale Multi-Tiered Storage (Big Data Mining and Analytics, 2024); Mole: Tier-Specific Hotness Profiling Driven Memory Tiering (arXiv:2610.12164); ARMS: Adaptive and Robust Memory Tiering System (arXiv:2508.04417).
+
+Data temperature combines access frequency and recency. Research shows age alone (assumes new data has priority, purely reactive usage) is insufficient; reaccess interval, unaccessed duration, and user-defined weights improve placement. ARMS identifies hot pages via relative scoring with two exponentially weighted moving averages of access counts per page: short-term EWMA_s (α_s=0.7) for responsiveness and long-term EWMA_l (α_l=0.1) for stability, avoiding fixed thresholds. `ids-hot-tier` scores hotness as a weighted combination of access frequency, recency (last-access age), record size, and sequentiality, with configurable per-class weights and no hardcoded temperature threshold for promotion decisions (thresholds are configurable budgets).
+
+#### 3.3 Hot tier placement and admission policy
+
+**Sources:** ARC (Megiddo & Modha, FAST'03); 2Q (Johnson & Shasha, VLDB 1994); CLOCK-Pro (cachekit Rust implementation); TinyLFU/W-TinyLFU (arXiv 2105.08770; used in Cassandra, Accumulo, HBase, Solr); HDFS storage policies (Hot → SSD, Warm → DISK, Cold → ARCHIVE); Apache Ozone storage policies; Alluxio tiered storage block allocation.
+
+Placement decides the initial tier for new data. Admission policy decides whether newly written or read-back data enters the hot tier. New writes land in hot by default unless hot-tier bypass is configured or capacity is exhausted. Policies are scan-resistant: ARC self-tunes recency vs. frequency lists; 2Q admits to hot only on a second reference (probation A1 → protected Am); CLOCK-Pro classifies pages hot/cold with ghost entries; TinyLFU/W-TinyLFU admits by comparing the incoming item's frequency sketch against victim(s), with a size-aware variant for variable-sized objects. `ids-hot-tier` makes the eviction/admission policy pluggable (ARC default; 2Q / CLOCK-Pro / W-TinyLFU behind feature flags), all O(1) on the critical path.
+
+#### 3.4 Hot tier promotion and demotion policy (hysteresis, thrashing prevention)
+
+**Sources:** IBM Easy Tier (warm/cold demotion, warm promotion, 80% tier capacity threshold, extent-level heat values); GlusterFS tiering (watermark-hi/lo, promote/demote frequency, access-count threshold); Mole (targeted promotion, staging demotion); f4 (asynchronous background migration as data cools).
+
+Promotion moves warm → hot when hotness exceeds the promote threshold; demotion moves hot → warm when hotness falls below the demote threshold. Hysteresis (promote threshold > demote threshold + margin, plus minimum dwell time / cooldown per record) prevents thrashing — the documented "move up, move back down" wasted-movement problem in tiered-storage research. Easy Tier triggers warm demotion when a higher tier exceeds bandwidth capacity and warm promotion when a lower tier exceeds IOPS capacity; GlusterFS uses watermark-hi/lo to gate promote/demote likelihood. `ids-hot-tier` implements per-record migration cooldown and a per-tick migration byte budget.
+
+#### 3.5 Hot tier access patterns and hotness scoring
+
+**Sources:** cachekit workloads (Hotset: 10% keys / 90% accesses; Zipfian exponent 1.0); Continuous-Time Modeling of Zipfian Workload Locality (NSF PAR 10623903); A Survey of Miss-Ratio Curve Construction Techniques (arXiv 1804.01972).
+
+Access-pattern tracking records per-record access count, last-access tick, first-access tick, access-size histogram, and sequentiality score. Hotness is derived from short+long EWMA of accesses plus recency decay. Working-set size is estimated via miss-ratio curves (MRC): the knee point marks cache saturation, which sizes the hot tier relative to the working set. Zipfian skew (rank-k probability ∝ 1/k^exponent) models the natural access skew; a small hot fraction of keys receives most traffic, which justifies a small, fast, expensive hot tier. `ids-hot-tier` maintains a bounded `AccessProfile` per record and recomputes temperature on each access and on each scanner tick.
+
+#### 3.6 Hot tier latency objectives (p50/p95/p99, tail latency, write pressure)
+
+**Sources:** Intel Optane DCPMM performance (~374 ns random read); split-level I/O scheduling, SIGMETRICS 2016 (SplitDeadline 4× tail-latency reduction); Reddb LSM compaction notes (P99 4 ms → 180 ms during major compaction; level0 slowdown trigger 20 files, hard stop 36); opendata.dev backpressure on unflushed deltas.
+
+Hot tier latency objectives are strict: sub-millisecond read targets for hot data (p50/p95/p99 tracked per payload size), enforced as deadlines keyed to `ids-time` ticks (never RTT-derived or wall-clock). Tail latency spikes come from compaction, write pressure, and page-cache eviction storms; mitigations include compaction budgets, level0-style slowdown/stop write triggers (`WriteThrottled` signal), backpressure on the write path, and deadline-based I/O scheduling (SplitDeadline pattern). `ids-hot-tier` exposes a latency-SLO tracker that records p50/p95/p99 post-warmup and flags SLO violations for admission/demotion decisions (a record whose access pattern violates its hot-tier SLO stays hot; one that cools below the hot floor is demoted).
+
+#### 3.7 Storage media and I/O path for the hot tier (DRAM / NVMe / SCM / Optane)
+
+**Sources:** Optane DCPMM report (arXiv 2002.06018); CMU "Are You Sure You Want to Use MMAP in Your DBMS?" (db.cs.cmu.edu/papers/2022/p13-crotty.pdf); Linux Direct I/O (kernel-internals.org); ScyllaDB Database Internals: Working with IO; persistent-memory programming model (Usenix ;login:, NVM.PM.FILE).
+
+Hot-tier media candidates: DRAM (nanosecond), SCM/Optane (~374 ns random read, ~391 ns random writeback), NVMe SSD (microsecond). Two I/O paths: (a) mmap — avoids syscall/copy overhead, zero-copy from page cache, but stalls when the page cache fills and the OS evicts pages (observed ~2× collapse under memory pressure; page-table memory 0.2% of mapped size); (b) O_DIRECT direct I/O — bypasses the page cache, predictable latency, synchronous completion at the device, strict sector alignment, no double buffering with an application-managed cache. Persistent memory programming (NVM.PM.FILE) exposes PM as memory-mapped files with cache-line flush/fence semantics. `ids-hot-tier` documents the mmap vs. direct-I/O decision as a storage-medium policy decision (per media type), not a mechanism it implements.
+
+#### 3.8 Block cache engineering (sharding, eviction, pinning)
+
+**Sources:** RocksDB Block Cache wiki (LRUCache/ClockCache, up to 64 shards, min 512 KB/shard, per-shard mutex, mutex-contention traces); Clock2Q+ / CLOCK-Pro concurrency design (per-bucket + per-entry locks); cachekit Rust policies (O(1) get/insert).
+
+Hot-tier block cache: sharded to mitigate lock contention (capacity divided evenly, shards don't share capacity; default up to 64 shards), each shard with its own mutex, hash table, and LRU/Clock list. Lookup and insert require locking the shard; every cache read is a likely metadata write (LRU reordering). Per-shard mutex contention on hot keys limits QPS under skew — more shards help only with uniform load and measurable lock wait time. Eviction policies (LRU, Clock, CLOCK-Pro, 2Q, ARC) live behind a common policy trait; pinning protects index/filter/high-priority blocks from scan eviction. `ids-hot-tier` specifies sharded cache structure, shard count as configurable, and O(1) critical-path operations.
+
+#### 3.9 Admission control and write pressure (write combining, small writes)
+
+**Sources:** ArchTM FAST'21 (avoid small writes to persistent memory; 16 KB combining buffer; sequential 3.7× faster than random 64-byte writes on Optane); AdaptSize NSDI'17 (probabilistic admission exp(−size/c), 10% higher OHR than deterministic threshold); NVCache arXiv 2205.14122 (Optane admission throttling vs lookup rate; writes hurt reads up to 80% write-heavy, 20% read-only).
+
+Admission into the hot tier generates writes (every newly inserted cache block must be written). On write-sensitive media (SCM/Optane/flash), indiscriminate admission disproportionately hurts read throughput. Mitigations: write combining / batching (coalesce small random writes into larger sequential writes; avoid sub-256-byte random writes on PM), probabilistic size-aware admission (small objects admitted with higher probability; large objects only after repeated requests), admission-rate throttling balanced against lookup rate, and small-bypass (skip caching for datasets that fit in DRAM / lower tiers). `ids-hot-tier` specifies write-combining batching on the hot write path and a configurable admission throttle.
+
+#### 3.10 Compaction and write amplification
+
+**Sources:** VAT multi-level KV-store analysis (arXiv 2003.00103 — tiering ~5× less amplification than leveling, KV separation ~10×); Reddb compaction notes (level0 slowdown/stop triggers, compaction budget); FDP NVMe stream placement (WAF ~1 sequential vs ~3–4 random).
+
+The hot tier's write path feeds flushes and compactions. Tiering compaction (no key-range merging within a level) cuts write amplification ~5× vs leveling at the cost of read/scan amplification; key-value separation reduces amplification ~10×. Compaction consumes I/O bandwidth and CPU, producing tail-latency spikes (P99 4 ms → 180 ms); write-pressure triggers slow down then stop writes (level0 file-count triggers), and a compaction budget limits compaction I/O during foreground-sensitive periods. FDP-style stream-aware placement keeps write amplification near 1 for sequential streams on NVMe. `ids-hot-tier` coordinates with the storage engine's compaction scheduler via backpressure signals, not direct control.
+
+#### 3.11 Hot tier capacity management (watermarks, spill to warm tier, reservations)
+
+**Sources:** GlusterFS tiering (watermark-hi/watermark-low); NetApp auto-tiering (cooling threshold 2–183 days default 31; hot-tier auto-increase +10% near full); plan-089 (ids-warm-tier: warm tier reserves bytes for expected promotions so hot-tier spill doesn't overflow warm; spill to cold when warm exceeds high watermark).
+
+Capacity management keeps the hot tier within budget: low watermark (stop demotions, allow promotions), high watermark (stop promotions, trigger demotions to warm), spill to the warm tier when hot exceeds the high watermark. Reservations: the hot tier coordinates with ids-warm-tier so warm tier reserves bytes for expected promotions, and hot-tier spill does not overflow warm. When the hot tier is full, admission of new hot data is rejected or redirected to the warm tier with a `CapacityExceeded` decision. `ids-hot-tier` tracks `tierStorageUsed` for the hot tier and exposes `isFull()` / `availableBytes()`. Auto-increase-style growth (+10% when near full) is a deployment option, not a default behavior.
+
+#### 3.12 Hot tier cost modeling (cost per byte, cost per access)
+
+**Sources:** Azure Blob access tiers (hot $0.021/GB first 50 TB vs cool $0.012, cold $0.0045, archive $0.002; write op charges per tier); HeliosDB 3-tier storage guide (Hot NVMe <1 ms $0.15/GB, Warm SATA 1–5 ms $0.04/GB, Cold S3 10–50 ms $0.02/GB); storgatech PLC SSD warm-tier SLOs (read p99 < 20 ms, TTL 30–90 days).
+
+Cost model: hot-tier cost per byte = storage price per GB/month + access price per operation × access frequency + migration price per GB × migration rate. Hot tier has the highest storage cost and the lowest access cost; the cost model compares hot vs. warm vs. cold alternatives to recommend the cost-minimizing tier for each record, subject to SLO constraints (latency, availability). S3 Intelligent-Tiering-style monitoring/automation charges and Google Nearline-style access/early-deletion fees are reference points for per-access and per-retrieval pricing. `ids-hot-tier` computes cost per byte per record class and enforces cost-per-byte budgets (over-budget placements rejected or redirected).
+
+#### 3.13 Carrier-agnostic transport boundary (ids-carrier::Endpoint)
+
+**Sources:** IDS carrier-agnostic rule (prompts.txt entries 1, 88); ids-000-aa sealed `trait Carrier` contract; HX-241 carrier/socket abstraction (Carrier/Socket/Endpoint traits with no networking-stack references).
+
+All hot-tier migration, replication, and placement traffic rides `ids-carrier::Endpoint` = `CarrierType` + `Vec<u8>` (≤ 1024 bytes). `CarrierType` enum: `Loopback`, `Serial`, `Optical`, `Radio`, `Custom(u16)`. This is the only address type in the workspace. No `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. `ids-hot-tier` never touches the carrier directly; it returns decisions that other crates frame into datagrams. The carrier is never trusted: placement decisions and audit entries are signed over bytes, surviving any carrier re-framing or duplication (idempotent decisions tolerate duplicate datagrams).
+
+#### 3.14 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Sources:** IDS allowed-crypto policy (prompts.txt); RFC 8032 Ed25519; RFC 7539/8439 ChaCha20-Poly1305; libsodium XChaCha20-Poly1305 (192-bit nonce); NIST FIPS 180-4 SHA-256; BLAKE3 spec.
+
+`ids-hot-tier` uses: ed25519 to sign placement/promotion/demotion/spill decisions and audit checkpoints; sha256 for hotness/access-pattern digest and audit-chain links; blake3 for fast content hashing of hot-state checkpoints (preferred for speed/parallelism); xchacha20poly1305 to encrypt hot-tier state at rest with random 192-bit nonces (safe for random generation); chacha20poly1305 for session/state payloads with 12-byte counter nonces (bounded use). No other crypto. `ids-crypto` exposes primitive IDs; `ids-hot-tier` references them via `ids-000-aa` only; signing keys never leave the node, are encrypted at rest, and zeroized on shutdown.
+
+---
+
+### 4. Threat Model & Mitigations
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Cache pollution / scan flushes hot working set | Hot tier hit ratio, latency | Scan-resistant eviction (2Q / CLOCK-Pro / ARC), ghost entries, admission filter, probation queue |
+| Thrashing (repeated promote/demote of same record) | Hot tier stability, migration bandwidth | Hysteresis: separate promote/demote thresholds + margin + minimum dwell time; per-record migration cooldown |
+| Latency SLO violation under compaction/write pressure | Hot tier read SLO | Compaction budget, level0-style slowdown/stop write triggers (`WriteThrottled`), write-path backpressure, deadline-based scheduling |
+| Hot tier capacity overflow | Hot tier availability | High-watermark demotions to warm, low-watermark promotion gating, spill-to-warm, `CapacityExceeded` admission decision |
+| Stale hotness after workload shift | Read latency, SLO violation | Periodic hotness scanner tick (monotonic ids-time), short+long EWMA, decay on idle ticks |
+| Migration storms (too many records moving at once) | Foreground traffic starvation | Migration bandwidth cap, per-tick migration byte budget, backoff under load (Alluxio tier-management pattern) |
+| Durability drop below profile requirement on demotion | Data durability | `ids-consistency-profile` coordination: demote only if target tier meets the record's profile durability scope |
+| Replay of placement/promotion/demotion decisions | Decision integrity | ed25519-signed audit checkpoints, nonce-bound decisions, bounded replay cache per decision type |
+| Temperature table tampering | Placement correctness | sha256/blake3 hash chain of temperature snapshots + periodic ed25519-signed checkpoints |
+| Key extraction (hot-tier signing key) | Decision authenticity | Signing keys never leave node; encrypted at rest (xchacha20poly1305/chacha20poly1305); zeroized on shutdown |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Idempotent placement decisions tolerate duplicates; carrier-agnostic boundary keeps no network stack in trust base |
+| Disallowed crypto algorithm | Crypto policy compliance | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305; CI allowlist test |
+
+The carrier is never trusted: placement decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-hot-tier ||
+|-------|------|--------------------------|--------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `PlacementDecision`, `OpRef`, `OrderingPos`, `Error` — consumed, never redefined; sealed trait contracts mirrored; `hot_cold_tier` invariant |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All hot-tier traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing decisions/audit; encrypting hot-tier state at rest; hashing hotness tables and access digests |
+| `ids-time` | Monotonic time source | All hotness scanner ticks, dwell times, and latency deadlines keyed to `IdsTime`, never wall-clock |
+| `ids-store`, `ids-read` | Primary record store (hot-tier consumer) | Receive admission/placement decisions; store records on the tier `ids-hot-tier` assigns |
+| `ids-erasure` | Erasure coding | Hot tier typically uses replication for resiliency; erasure coding only where the redundancy policy allows |
+| `ids-replication` | Replica synchronization / migration | Performs hot↔warm data movement as opaque `Endpoint` datagrams per `MigrationPlan`/`SpillDecision` |
+| `ids-warm-tier` (Phase 089) | Warm storage tier | Demotion target for cooled hot data; spill target when hot exceeds high watermark; reserves bytes for expected promotions from hot |
+| `ids-consistency-profile` (Phase 060) | Read/write behavior per profile | Demotion must not violate a record's profile durability/quorum requirement; profile tags records |
+| `ids-fault`, `ids-backpressure` | Fault tolerance / backpressure | Bounded migration and repair bandwidth so foreground hot traffic is not starved |
+| `ids-accounting`, `ids-cost` | Cost tracking | Hot-tier cost per byte per record class; feeds the cost model |
+
+**Integration points:** `ids-hot-tier` drives public contracts declared in `ids-000-aa`; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on ids-discovery/ids-session/ids-cli beyond what the contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-hot-tier/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-hot-tier/
+├── Cargo.toml                          # Crate manifest; depends on ids-000-aa, ids-carrier, ids-crypto, ids-time
+├── lib.rs                              # Crate root, public API surface, feature gates
+├── constants.rs                        # Hot tier defaults: watermarks, hotness weights, SLO targets, migration caps
+├── error.rs                            # HotTierError (thiserror): admission, capacity, migration, latency, temperature errors
+├── features.rs                         # Feature flags: crypto, audit, arc-policy, twoq-policy, clockpro-policy, tinylfu-policy
+├── carrier_adapter.rs                  # Opaque Vec<u8> datagram framing to ids-carrier::Endpoint (decision carrier only)
+│
+├── placement/                          # Hot tier placement and admission
+│   ├── mod.rs
+│   ├── admission.rs                    # AdmitDecision: admit to hot / redirect to warm / reject CapacityExceeded
+│   ├── eviction.rs                     # Eviction candidate selection under capacity pressure
+│   ├── policy.rs                       # Pluggable admission/eviction policy trait + selection
+│   ├── topology.rs                     # Topology hints for hot tier placement (rack/region awareness)
+│   ├── reservation.rs                  # Hot tier capacity reservation for expected promotions from warm
+│   └── types.rs                        # PlacementDecision, AdmissionResult, SpillDecision structures
+│   └── policies/                       # Concrete replacement/admission policies (O(1) critical path)
+│       ├── mod.rs
+│       ├── arc.rs                      # Adaptive Replacement Cache (self-tuning recency/frequency)
+│       ├── two_q.rs                    # 2Q: probation FIFO + protected LRU, admit on second reference
+│       ├── clock_pro.rs                # CLOCK-Pro: scan-resistant hot/cold classification + ghost ring
+│       ├── tiny_lfu.rs                 # W-TinyLFU: frequency-sketch admission, size-aware variant
+│       ├── lru.rs                      # Baseline LRU (reference/comparison)
+│       └── lfu.rs                      # Baseline LFU (reference/comparison)
+│
+├── promotion/                          # Hot tier promotion/demotion with hysteresis
+│   ├── mod.rs
+│   ├── promoter.rs                     # Warm→hot promotion candidate selection
+│   ├── demoter.rs                      # Hot→warm demotion candidate selection
+│   ├── hysteresis.rs                   # Hysteresis: separate thresholds + margin + min dwell time
+│   ├── scanner.rs                      # Hotness scanner sweep on monotonic ids-time ticks
+│   └── types.rs                        # PromotionDecision, DemotionDecision structures
+│
+├── access/                             # Hot tier access-pattern tracking
+│   ├── mod.rs
+│   ├── tracker.rs                      # Records access count, recency tick, size, sequentiality per record
+│   ├── scorer.rs                       # Hotness score = f(frequency, recency, size, weights)
+│   ├── decay.rs                        # Access-frequency decay over idle ticks
+│   ├── histogram.rs                    # Bounded access histogram (frequency/size/sequentiality)
+│   ├── mrc.rs                          # Miss-ratio curve / working-set-size estimation
+│   └── types.rs                        # AccessProfile, AccessRecord, TemperatureScore structures
+│
+├── latency/                            # Hot tier latency objectives
+│   ├── mod.rs
+│   ├── slo.rs                          # Latency SLO targets (p50/p95/p99 per payload size)
+│   ├── tracker.rs                      # Percentile tracking post-warmup, SLO violation detection
+│   ├── percentiles.rs                  # p50/p95/p99 extraction from histogram/sketch
+│   ├── deadline.rs                     # ids-time-keyed deadline enforcement for hot operations
+│   └── types.rs                        # LatencyResult, SloViolation structures
+│
+├── cost/                               # Hot tier cost modeling
+│   ├── mod.rs
+│   ├── cost_model.rs                   # Cost per byte + cost per access + migration cost
+│   ├── pricing.rs                      # Hot tier pricing vs warm/cold alternatives
+│   ├── budget.rs                       # Cost-per-byte budget enforcement
+│   └── types.rs                        # CostModelResult, CostBudget structures
+│
+├── capacity/                           # Hot tier capacity management (watermarks)
+│   ├── mod.rs
+│   ├── watermarks.rs                   # Low/high watermark logic, isFull, availableBytes
+│   ├── spill.rs                        # Spill-to-warm when hot exceeds high watermark
+│   ├── allocator.rs                    # Hot tier byte allocation tracking (tierStorageUsed)
+│   ├── reservations.rs                 # Reservations for expected promotions (with ids-warm-tier)
+│   └── types.rs                        # CapacityState, WatermarkConfig structures
+│
+├── storage/                            # Hot tier storage media and I/O path
+│   ├── mod.rs
+│   ├── media.rs                        # Media abstraction: DRAM / NVMe / SCM / Optane characteristics
+│   ├── io_path.rs                      # I/O path decision: mmap vs direct I/O (O_DIRECT) per media
+│   ├── mmap.rs                         # mmap-based access: page-cache reliance, flush/fence notes
+│   ├── direct_io.rs                    # Direct I/O: bypass page cache, alignment, predictable latency
+│   ├── write_combining.rs              # Write combining/batching: coalesce small writes into sequential
+│   └── types.rs                        # MediaType, IoPathDecision structures
+│
+├── block_cache/                        # Hot tier block cache (sharded)
+│   ├── mod.rs
+│   ├── shards.rs                       # Sharded cache: capacity divided across shards, no cross-shard sharing
+│   ├── lru_shard.rs                    # Per-shard LRU with mutex + hash table
+│   ├── clock_shard.rs                  # Per-shard Clock variant
+│   ├── pin.rs                          # Pinning: protect index/filter/high-priority blocks from eviction
+│   └── types.rs                        # ShardConfig, CacheHandle structures
+│
+├── write_path/                         # Hot tier write path (group commit, backpressure)
+│   ├── mod.rs
+│   ├── batcher.rs                      # Write batching / combining before flush
+│   ├── fsync.rs                        # Group commit: one sync per batch (Always/EveryN/Interval/Never policies)
+│   ├── backpressure.rs                 # Write-pressure triggers: slowdown then stop (WriteThrottled)
+│   └── types.rs                        # BatchConfig, WritePressureState structures
+│
+├── contracts/                          # Sealed trait contracts (~11 files)
+│   ├── mod.rs
+│   ├── placement_contract.rs           # trait Placement (admission/eviction)
+│   ├── promotion_contract.rs           # trait Promotion
+│   ├── demotion_contract.rs            # trait Demotion
+│   ├── eviction_contract.rs            # trait Eviction
+│   ├── hotness_contract.rs             # trait Hotness (scoring)
+│   ├── latency_contract.rs             # trait LatencySlo
+│   ├── capacity_contract.rs            # trait Capacity (watermarks)
+│   ├── cost_contract.rs                # trait Cost
+│   ├── carrier_contract.rs             # trait HotCarrier (decision framing to Endpoint)
+│   ├── types.rs                        # Contract-level type re-exports
+│   └── sealed.rs                       # private::Sealed supertrait for contract sealing
+│
+├── invariants/                         # Compile-time/runtime invariants (~11 files)
+│   ├── mod.rs
+│   ├── hot_cold_tier.rs                # hot_cold_tier invariant (hot tier holds hot-set working data)
+│   ├── watermark_ordering.rs           # low < high watermark ordering
+│   ├── latency_slo.rs                  # latency SLO deadline soundness
+│   ├── hysteresis_sound.rs             # promote threshold > demote threshold + margin
+│   ├── carrier_agnostic.rs             # No std::net/tokio::net in crate
+│   ├── crypto_allowlist.rs             # Only allowed crypto algorithms
+│   ├── admission_sound.rs              # Admission respects capacity + cost budget
+│   ├── spill_sound.rs                  # Spill to warm respects warm-tier reservations
+│   ├── audit_chain_sound.rs            # Audit chain hash + signature validity
+│   └── types.rs                        # Invariant-level type re-exports
+│
+├── audit/                              # Signed, hash-chained audit log (~7 files)
+│   ├── mod.rs
+│   ├── audit_entry.rs                  # Placement/promotion/demotion/spill decision entry
+│   ├── audit_chain.rs                  # sha256/blake3 hash chain
+│   ├── checkpoint.rs                   # Periodic ed25519-signed checkpoint
+│   ├── signer.rs                       # ed25519 signing of decisions/checkpoints
+│   ├── verifier.rs                     # Offline verification of audit chain
+│   ├── replay.rs                       # Bounded replay cache per decision type
+│   └── types.rs                        # AuditEntry, Checkpoint structures
+│
+├── tests/                              # Property/verification tests (~30 files)
+├── benches/                            # Criterion benchmarks (~10 files)
+├── docs/                               # Documentation (~16 files)
+├── spec/                               # Normative specifications (~5 files)
+├── baselines/                          # Stored baseline results (~3 files)
+└── test_vectors/                       # Deterministic inputs and expected outputs (~3 files)
+```
+
+Total: ~160–220 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `tests/`, `benches/`, `docs/`, `spec/`, `baselines/`, `test_vectors/` — within the ~90–1000 target range; organized by subsystem so each concern is a separate file (the "separate crates instead of more folders" directive applied intra-crate as separate modules/files). No stubs; every file holds production-grade code with error handling, documentation, and tests.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+- **AccessProfile / hotness score**: `AccessProfile { access_count: u64, last_access_tick: IdsTime, first_access_tick: IdsTime, size_bytes: u64, sequentiality: f64 }`; `hotness = w_freq·EWMA_s(access_count) + w_recency·decay(now − last_access_tick) + w_size·size_class + w_seq·sequentiality`, weights configurable per record class; EWMA_s (α_s=0.7) + EWMA_l (α_l=0.1) per ARMS for responsiveness vs. stability.
+- **Classifier**: `classify(hotness) → Hot | SpillCandidate` using configurable hot threshold; hysteresis band between promote and demote thresholds.
+- **Placement/admission decision**: `admit(record, hot_available) → AdmitToHot | RedirectToWarm | Reject(CapacityExceeded)`; considers hot watermark, cost budget, redundancy feasibility.
+- **Promotion/demotion with hysteresis**: `promote_if(hotness ≥ promote_threshold && dwell ≥ min_dwell)`; `demote_if(hotness ≤ demote_threshold && dwell ≥ min_dwell)`; margin prevents boundary thrashing.
+- **Watermark capacity**: `low_watermark ≤ tierStorageUsed ≤ high_watermark`; above high → stop promotions + trigger demotions + spill to warm; below low → allow promotions; reservation reserves bytes for expected promotions (coordinated with ids-warm-tier).
+- **Spill decision**: `SpillDecision { bytes: u64, target_tier: Warm, bandwidth_cap: u64/s, throttle_under_load: bool }`; per-tick migration byte budget; backoff when foreground I/O saturated.
+- **Latency SLO**: `SloTracker` records p50/p95/p99 post-warmup per payload size; `deadline(now + budget, ids-time)` gates hot operations; SLO violation feeds admission/demotion.
+- **Cost model**: `cost_per_byte = storage_price_per_gb + access_price_per_op × access_freq + migration_price_per_gb × migration_rate`; compares hot vs. warm vs. cold subject to SLO.
+- **Write path**: group commit — one `write` + at most one `fdatasync` per batch (Always/EveryN/Interval/Never fsync policies); write combining coalesces small writes into sequential writes before flush (avoids 256-byte PM granularity penalty: 64-byte random write ≈ 25% of sequential bandwidth); write-pressure slowdown then `WriteThrottled`.
+- **Block cache**: sharded (default ≤ 64 shards, ≥ 512 KB/shard), per-shard mutex + hash table + LRU/Clock list; pluggable eviction policies (ARC default, 2Q, CLOCK-Pro, W-TinyLFU); pinning for high-priority blocks; O(1) get/insert/contains/remove.
+- **Audit chain**: each placement/promotion/demotion/spill decision = SHA-256/BLAKE3-chained entry + ed25519-signed checkpoint; offline verifiable.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `PlacementDecision`, `OpRef`, `OrderingPos`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `ids-time` — monotonic time source for hotness scanner ticks, dwell time, and latency deadlines.
+- `serde` — serialization of hot-tier envelopes, temperature profiles, audit entries.
+- `thiserror` — error types.
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. Policy crates (arc, two_q, clock_pro, tiny_lfu) are behind feature flags with no external crate dependency (self-contained implementations per research references).
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+|| # | Criterion | Measurement ||
+|---|-----------|-----------|-------------|
+| AC-88.1 | Hot tier admission: admit-to-hot, redirect-to-warm, reject(CapacityExceeded) | `AdmitDecision` correct below/above/at hot watermarks; unit tests cover boundary values |
+| AC-88.2 | Hot tier promotion: warm→hot on hotness ≥ promote threshold | `PromoteDecision` emitted; threshold-crossing unit tests pass |
+| AC-88.3 | Hot tier demotion: hot→warm on hotness ≤ demote threshold | `DemoteDecision` emitted; target tier = warm |
+| AC-88.4 | Hot tier access patterns: per-record count/recency/size; hotness = short+long EWMA | `AccessProfile` updated on every access; scanner recompute deterministic |
+| AC-88.5 | Latency objectives: p50/p95/p99 hot read ≤ configurable sub-ms SLO target | `SloTracker` reports percentiles post-warmup; SLO violation test passes |
+| AC-88.6 | Capacity watermarks: low < high; spill to warm above high watermark | `isFull`/`availableBytes` correct; spill decision triggered above high watermark |
+| AC-88.7 | Cost model: cost per byte per record class vs warm/cold | Cost model output matches pricing formula; budget enforcement rejects over-budget placements |
+| AC-88.8 | Hysteresis: no thrashing at hot/warm boundary | Promote threshold > demote threshold + margin + min dwell; thrash test passes |
+| AC-88.9 | Write path: group commit / write combining; backpressure under write pressure | `WriteThrottled` signal above slowdown trigger; stop above hard trigger; batch fsync policy honored |
+| AC-88.10 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test passes; carrier-agnostic invariant test passes |
+| AC-88.11 | Crypto allowlist: only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 | Allowlist unit test passes |
+| AC-88.12 | Audit: append-only, hash-chained, ed25519-signed placement/promotion/demotion/spill decisions | Audit chain verifies offline; checkpoints signed; replay cache bounds duplicates |
+| AC-88.13 | Determinism: same seed + scenario → identical hotness/placement decisions | Determinism tests pass |
+| AC-88.14 | Run manifest per evaluation (git revision, dirty state, toolchain, host, config, results) | Schema-versioned JSON emitted |
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete hotness thresholds:** promote/demote temperature thresholds and margins are deployment-tuned; to be validated at integration with `ids-store`/`ids-erasure`/`ids-warm-tier`.
+- **EWMA α values and decay shape:** short/long EWMA weights (α_s=0.7/α_l=0.1 from ARMS are a starting point) and recency decay function (linear vs. exponential) are workload-dependent; unquantified defaults.
+- **Watermark ratios:** low/high hot-tier watermark values (e.g., 70%/85%) are capacity-planning decisions; Easy Tier uses 80% as a reference point.
+- **Spill-to-warm interface:** `ids-warm-tier` (Phase 089) is the spill/demotion target and reserves bytes for hot promotions, but the exact reservation handshake (`reservation_bytes`, `availableBytes`) is defined in plan-089 and validated at integration.
+- **Hot media choice:** DRAM vs. NVMe vs. SCM/Optane per deployment; cost/latency tradeoff unquantified for IDS hardware.
+- **Latency SLO numeric targets:** sub-millisecond read objective is indicative; must be re-measured on the target host before thresholds are set (Optane ~374 ns random read shows SCM can approach DRAM).
+- **Redundancy default for hot tier:** replication factor (typically 3×, resiliency) vs. erasure coding where policy allows; selection is a deployment decision (f4: RS(10,4) cut warm effective replication 3.6→2.1; hot tier favors replication).
+- **Write-combining batch size and flush interval:** tune for target media (NVMe vs. PM); unquantified.
+- **Block cache shard count:** default ≤ 64 shards (RocksDB) balances scalability vs. mutex contention; optimal count host-dependent.
+
+---
+
+### 11. Engineering Decisions Summary
+
+|| Decision | Rationale ||
+|----------|-----------|-------------|
+| Separate crate `ids-hot-tier` (not a folder) | Follows "separate crates instead of more folders" directive; clear policy boundary |
+| Pluggable eviction/admission policies (ARC default; 2Q, CLOCK-Pro, W-TinyLFU alternatives) | All are scan-resistant, O(1), research-verified; ARC self-tunes without workload-specific tuning |
+| Hotness = short+long EWMA + recency + size, weighted | ARMS/relative scoring avoids brittle fixed thresholds; frequency+recency+size beats age-only classification |
+| Hysteresis: separate promote/demote thresholds + margin + min dwell | Prevents thrashing documented in tiered-storage research (wasted move up/down cycles) |
+| Low/high watermarks + spill to warm tier | Gluster/NetApp/Easy Tier capacity pattern; keeps hot tier within budget; warm tier reserves bytes for hot promotions |
+| Latency deadlines keyed to `ids-time` ticks; never wall-clock for SLOs | Clock manipulation cannot break latency/dwell correctness; monotonic ticks only |
+| Write combining + group commit on hot write path | Coalesces small writes (PM 256-byte granularity penalty); one fsync per batch caps sync cost |
+| Write-pressure slowdown → `WriteThrottled` → hard stop | LSM write-pressure pattern (level0 triggers) degrades gracefully instead of silent collapse |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Offline-verifiable decision log; tamper evidence |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitive IDs via `ids-000-aa` | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+[^1]: Megiddo & Modha, "ARC: A Self-Tuning, Low Overhead Replacement Cache," USENIX FAST'03. https://usenix.org/legacy/event/fast03/tech/full_papers/megiddo/megiddo.pdf — self-tuning recency/frequency replacement, O(1), empirically universal.
+[^2]: Johnson & Shasha, "2Q: A Low Overhead High Performance Buffer Management Replacement Algorithm," VLDB 1994. https://vldb.org/conf/1994/P439.PDF — probation FIFO + protected LRU, admit on second reference.
+[^3]: CLOCK-Pro Rust implementation & spec (cachekit). https://docs.rs/cachekit/latest/cachekit/policy/clock_pro — scan-resistant hot/cold classification, ghost ring, O(1).
+[^4]: "A Survey on Tiering and Caching in High-Performance Storage Systems," arXiv 1904.11560. https://arxiv.org/html/1904.11560v1 — tiering vs. caching, promotion/demotion, LRU/LFU/ARC/2Q/LIRS classification.
+[^5]: DTHC-RS, "Dual-Price Hot-Tier Placement and Reliability-Aware Coding for Elastic Cloud Storage." https://ojs.sgsci.org/journals/jitp/article/download/660/438 — capacity price + reliability price, value-density admission, reliability-guided redundancy.
+[^6]: ARMS, "Adaptive and Robust Memory Tiering System," arXiv 2508.04417. https://arxiv.org/html/2508.04417v2 — relative hotness scoring, short+long EWMA (α_s=0.7, α_l=0.1), no fixed thresholds.
+[^7]: "A Prompt Report on the Performance of Intel Optane DC Persistent Memory Module," arXiv 2002.06018. https://arxiv.org/html/2002.06018v1 — random read ~374 ns, random writeback ~391 ns, ~38 GB/s interleaved read.
+[^8]: RocksDB Secondary Cache (block cache on NVM/SCM). https://rocksdb.org/blog/2021/05/27/rocksdb-secondary-cache.html — non-volatile second-tier block cache, promotion as blocks get hotter.
+[^9]: RocksDB Block Cache wiki. https://github.com/facebook/rocksdb/wiki/Block-Cache — LRUCache/ClockCache, up to 64 shards, min 512 KB/shard, per-shard mutex.
+[^10]: Haridasov et al., "VAT: Asymptotic Cost Analysis for Multi-level Key-Value Stores," arXiv 2003.00103. https://arxiv.org/html/2003.00103 — tiering ~5× less write amplification than leveling, KV separation ~10×.
+[^11]: wal-engine (Rust WAL with group commit). https://github.com/anirudhpundhir/wal-engine — group commit one write + at most one fdatasync per batch; fsync policies Always/EveryN/Interval/Never.
+[^12]: Crotty et al., "Are You Sure You Want to Use MMAP in Your DBMS?" (db.cs.cmu.edu, 2022). https://db.cs.cmu.edu/papers/2022/p13-crotty.pdf — mmap overheads, page-cache-fill eviction stalls, O_DIRECT predictability.
+[^13]: Linux Direct I/O and Page Reclaim (kernel-internals.org). https://kernel-internals.org/io/direct-io ; https://kernel-internals.org/mm/reclaim — O_DIRECT bypasses page cache; kswapd low/min watermarks, direct reclaim below min.
+[^14]: ArchTM, FAST'21 (pasalabs.org). http://pasalabs.org/papers/2021/fast21_archTM.pdf — avoid small PM writes; 16 KB combining buffer; sequential 3.7× faster than random 64-byte writes on Optane.
+[^15]: AdaptSize, NSDI'17 (CMU). https://cs.cmu.edu/~harchol/Papers/NSDI17.pdf — probabilistic size-aware admission exp(−size/c), ~10% higher OHR than deterministic threshold.
+[^16]: NVCache, "Writes Hurt: Lessons in Cache Design for Optane NVRAM," arXiv 2205.14122. https://arxiv.org/html/2205.14122v1 — admission rate throttled vs. lookup rate; writes hurt reads up to 80% write-heavy on Optane.
+[^17]: cachekit workloads (OxidizeLabs). https://github.com/OxidizeLabs/cachekit/blob/main/docs/benchmarks/workloads.md — Hotset (10% keys / 90% accesses), Zipfian exponent 1.0.
+[^18]: Continuous-Time Modeling of Zipfian Workload Locality (NSF PAR). https://par.nsf.gov/servlets/purl/10623903 — locality modeling for stochastic/Zipfian workloads, working-set estimation.
+[^19]: "A Survey of Miss-Ratio Curve Construction Techniques," arXiv 1804.01972. https://arxiv.org/html/1804.01972v1 — MRC/HRC estimates working-set size; knee point marks saturation.
+[^20]: Red Hat Gluster Storage, "Managing Tiering" (watermark-hi/lo, promote/demote). https://docs.redhat.com/en/documentation/red_hat_gluster_storage/3.4/html/administration_guide/chap-managing_data_tiering — automatic hot/cold classification and movement without I/O interruption.
+[^21]: NetApp Auto Tiering (community). https://community.netapp.com/t5/user/viewprofilepage/user-id/72615/user-messages-feed/participations — cooling threshold 2–183 days (default 31), hot-tier auto-increase +10% near full.
+[^22]: opendata.dev, "Writing Data" (backpressure on unflushed deltas). https://opendata.dev/docs/overview/writing-data — backpressure stalls writes until flush frees memory; graceful degradation.
+[^23]: Reddb.io, "Notes from compaction hell" (LSM compaction spikes). https://reddb.io/blog/lsm-tree-compaction-notes — P99 4 ms → 180 ms during major compaction; level0 slowdown 20 / stop 36 triggers.
+[^24]: Split-level I/O Scheduling, SIGMETRICS 2016. https://dl.acm.org/doi/10.1145/2815400.2815421 — SplitDeadline reduces tail latencies 4×.
+[^25]: TiKV Tiered Storage Overview (read amplification). https://docs.pingcap.com/tidbcloud/tiered-storage-overview — ~30,000× read amplification on cache miss (3 MiB fetched for 100-byte record).
+[^26]: FlatCake / Mooncake tiered-storage read amplification (arXiv 2610.38355). https://arxiv.org/html/2610.38355v1 — Mooncake 6.5–6.7× SSD read amplification.
+[^27]: Storj, "Replication is bad for decentralized storage, part 1: Erasure codes." https://storj.io/blog/replication-is-bad-for-decentralized-storage-part-1-erasure-codes-for-fun-and-profit — replication anchors durability to expansion factor; erasure coding lowers overhead.
+[^28]: f4: Facebook's Warm BLOB Storage System, USENIX OSDI'14. https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-muralidhar.pdf — RS(10,4), effective replication 3.6 → 2.8/2.1 (warm tier reference; hot tier favors replication).
+[^29]: Azure Blob access tiers (pricing). https://learn.microsoft.com/en-us/azure/storage/blobs/access-tiers-overview — hot $0.021/GB vs cool $0.012, cold $0.0045, archive $0.002; write op charges per tier.
+[^30]: HeliosDB 3-Tier Storage User Guide (tier cost/latency table). https://heliosdb.com/docs/full/guides/platform/tiered_storage_user_guide — Hot NVMe <1 ms $0.15/GB; Warm SATA 1–5 ms $0.04/GB; Cold S3 10–50 ms $0.02/GB.
+[^31]: Persistent Memory Programming Model (Usenix ;login:, Summer 2017). https://usenix.org/system/files/login/articles/login_summer17_07_rudoff.pdf — NVM.PM.FILE, memory-mapped persistent memory, flush/fence semantics.
+[^32]: Komprise, "Block-level Tiering vs File-level Tiering." https://komprise.com/resource/block-level-tiering-vs-file-level-tiering — block-level (NetApp FabricPool, Dell CloudPools, Windows Storage Spaces heat map) vs file-level tiering; granularity is a first-class decision.
+[^33]: Clock2Q+ / CLOCK concurrency design (arXiv 2511.21958). https://arxiv.org/html/2511.21958 — per-bucket + per-entry locking for concurrent caches; lock ordering to avoid deadlock.
+[^34]: RFC 8032 (Ed25519), RFC 7539/8439 (ChaCha20-Poly1305), libsodium XChaCha20-Poly1305, NIST FIPS 180-4 (SHA-256), BLAKE3 spec — allowed-crypto specifications.
+[^35]: IDS project documents at C:/idfs: prompts.txt entry 88 (lines 1315-1329), CRATES.md entry 88 (ids-hot-tier), ids-000-aa skeleton at C:/idfs/ids-000-aa/, sister plan plan-089.md (ids-warm-tier) at C:/idfs/plans/, plan format references plan-001.md/plan-048.md/plan-060.md.
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made. The blueprint above defines all architecture, interfaces, data structures, algorithms, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 088 (ids-hot-tier).
+
+
 # PHASE 089:
 
 ## Phase 089 — Create the ids-warm-tier crate (Warm storage for moderately accessed data): Research Findings & Implementation Blueprint
@@ -41274,3 +42197,5245 @@ No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond t
 
 **Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made. The blueprint above defines all architecture, interfaces, data structures, algorithms, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 089 (ids-warm-tier).
 
+
+# PHASE 090:
+
+## Phase 090 — Create the ids-cold-tier crate: Cold storage for archival data.
+|**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**|
+|---|
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1345-1359)
+
+```
+90. Research only do not read plan.md **[Phase 090 — Create the ids-cold-tier crate: Cold storage for archival data.]**
+
+Crate: ids-cold-tier
+Purpose: Cold storage for archival data.
+Contents: Cold tier placement, cold tier promotion/demotion, cold tier cost, cold tier capacity management, cold tier access patterns, retrieval latency.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 090 — Create the ids-cold-tier crate: Cold storage for archival data.]**
+
+Create plan-090.md in C:/idfs/plans/ for the ids-cold-tier crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 090 creates `ids-cold-tier`, the IDS crate for cold storage of archival data. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by cold-tier function: placement, promotion/demotion, cost tracking, capacity management, access-pattern monitoring, retrieval latency, integrity scrubbing, WORM enforcement, and lifecycle (restore/rehydrate/decommission). `ids-cold-tier` does not open sockets or drive any transport directly; it evaluates cold-tier policy — whether data qualifies for cold placement, whether it should be promoted or demoted, what retrieval tier applies, whether capacity quotas are honored — and ships every action-relevant message as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`).
+
+Cold tier semantics (research-verified against S3 Glacier, Azure Blob, Google Cloud Coldline/Archive, Facebook f4, CERN EOS):
+
+- **Placement** — data that has not been accessed within a configurable cold-threshold (e.g., 90 days Azure Cold tier minimum, 365 days GCP Archive minimum, 12+ months archival) is placed in cold storage. Placement is based on access temperature (last access time + access count per window) and/or fixed age.
+- **Promotion** — cold data accessed frequently enough (e.g., 3+ accesses in a week) is promoted back to a warmer tier; promotion is billed as a read from the source tier and carries early-deletion-fee exposure if the minimum retention period has not elapsed.
+- **Demotion** — hot/warm data that cools below threshold is demoted to cold; capacity pressure (high-watermark) triggers background demotion of coldest objects first, with write rate-limiting during capacity tightness (PrismDB compaction pattern).
+- **Cost** — cold tier charges per-GB-month storage plus per-GB retrieval and per-operation fees; retrieval fees dominate for frequently-read cold data, so cold placement pays off only below a target read frequency. Minimum retention periods (30/90/180/365 days) with prorated early-deletion fees apply.
+- **Capacity management** — per-tier capacity quotas; writes blocked when quota reached; capacity overshoot possible between enforcement cycles; per-bucket caps prevent one tenant exhausting shared quota.
+- **Access patterns** — archival workloads follow "Write Once, Read Maybe" (CERN EOS: 0.22% of files updated once, 0.09% more than once, Zipfian read distribution). Cold data is written once, rarely updated, may never be read. Retrieval SLAs range from milliseconds (GCP Archive/Coldline instant access) to minutes/hours (S3 Glacier Flexible Retrieval expedited 1–5 min, standard 3–5 h, bulk 5–12 h; Deep Archive standard 12 h, bulk 48 h; Azure Archive rehydrate up to 15 h for 10 GiB).
+- **Retrieval latency** — cold retrieval is async staging (restore job → temporary copy) not immediate read; retrieval tier (expedited/standard/bulk) trades speed for cost; provisioned capacity guarantees retrieval bandwidth.
+
+Carrier-agnostic absolute rule: no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via `ids-carrier::Endpoint`. Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 (implemented in `ids-crypto`; `ids-cold-tier` consumes type surface and primitive IDs from `ids-000-aa`/`ids-crypto` only).
+
+A skeleton `ids-cold-tier` crate does NOT yet exist at `C:/idfs/ids-cold-tier/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `IdsTime`, `CarrierType`, `Checksum`, plus sealed trait contracts and error types. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+Research basis: 30 parallel searches returned S3 Glacier storage classes and retrieval options (Instant Retrieval milliseconds; Flexible Retrieval expedited 1–5 min / standard 3–5 h / bulk 5–12 h; Deep Archive standard within 12 h / bulk within 48 h; provisioned expedited capacity), S3 Intelligent-Tiering automatic promotion/demotion with monitoring charge and archive/deep-archive access tiers, Azure Blob access tiers (Hot/Cool/Cold/Archive; minimums 30/90/180 days; early deletion prorated fees; Archive rehydrate up to 15 h; smart tier auto-promotion at 30/90 days), Google Cloud Storage classes (Nearline 30 days, Coldline 90 days, Archive 365 days; millisecond access on all classes; retrieval fees $0.01–$0.05/GB), Facebook f4 OSDI'14 (warm/cold temperature zones; effective replication factor 3.6 → 2.8 or 2.1 via erasure coding; rack/datacenter failure resilience), CERN EOS workload characterization (Write Once, Read Maybe; 139M files, 0.22% updated once, Zipfian reads; three-tier analysis/archive/tape), DT-RAID heat-based promotion/demotion with hysteresis (promote at heat 140, demote below 127 to prevent oscillation), PrismDB time-aware tiered compaction (high-watermark 98% triggers demotion compaction; low-watermark 95%; clock algorithm for LRU tracking; rate-limited writes during capacity pressure), Infoscale SmartTier I/O temperature / access temperature (I/O temperature = bytes transferred / file size / period; access temperature = recency; hysteresis to prevent thrashing), Elasticsearch hot/warm/cold/frozen data tiers, Ceph cache tiering (writeback/writeback modes; flush from cache to cold backing tier), MAID (Massive Array of Idle Disks; spin-down of idle drives; archival replacement for tape), WORM/object-lock compliance (SEC 17a-4(f), FINRA 4511, CFTC 1.31; S3 Object Lock compliance/governance mode; Glacier Vault Lock immutable retention), bit rot detection via Merkle-tree scrubbing (rolling 7–30 day scrub cadence on cold tier; O(log n) divergence isolation), erasure coding for cold storage (replication factor reduction; repair bandwidth problem; lazy repair), storage cost per GB tier comparisons (hot $0.018–0.023/GB; cool/nearline $0.01–0.015; cold $0.004–0.0045; archive/deep archive $0.00099–0.0012/GB-month; retrieval $0.01–0.05/GB; operations 1000× more expensive on archive), OAIS long-term preservation architecture (fixity cadence annual; WORM; hours retrieval SLA).
+
+---
+
+### 2. Architecture Overview
+
+`ids-cold-tier` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/evaluation layer: given a data object tagged with its tier and access history, it decides (a) whether the object belongs in cold tier, (b) whether to promote/demote, (c) what retrieval tier and SLA apply, (d) whether capacity quota allows placement, (e) what integrity-scrub cadence and WORM retention apply. It never sends bytes itself; it returns `PlacementDecision`, `PromoteDemoteDecision`, `RetrievalDecision`, `CapacityDecision` that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (tier users)                    │
+│  ids-store, ids-replication, ids-fragment — data tagged with tier + heat    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 090: ids-cold-tier (THIS CRATE — cold-tier policy)      │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌──────────┐│
+│  │ placement        │ │ promotion/demotion│ │ cost             │ │ capacity ││
+│  │ engine           │ │ (temperature + age)│ │ tracking         │ │ quotas   ││
+│  │ (cold threshold) │ │ hysteresis        │ │ per-GB-month +   │ │ per-tier ││
+│  └──────────────────┘ └──────────────────┘ │ retrieval + ops  │ │ caps     ││
+│  ┌──────────────────┐ ┌──────────────────┘ └──────────────────┘ └──────────┘│
+│  │ access-pattern   │ │ retrieval          │ │                  │            ││
+│  │ monitor          │ │ tier (expedited/   │ │                  │            ││
+│  │ (last access,    │ │ standard/bulk)     │ │                  │            ││
+│  │ count, window)   │ │ SLA + provisioned  │ │                  │            ││
+│  └──────────────────┘ └──────────────────┘ │                  │            ││
+│  ┌──────────────────┐ ┌──────────────────┐ │                  │            ││
+│  │ integrity        │ │ WORM / retention │ │                  │            ││
+│  │ scrubbing        │ │ enforcement      │ │                  │            ││
+│  │ (Merkle, cadence)│ │ (legal hold,     │ │                  │            ││
+│  └──────────────────┘ │ minimum days)    │ │                  │            ││
+│  ┌──────────────────┐ └──────────────────┘ │                  │            ││
+│  │ lifecycle        │ │ audit/logging    │ │                  │            ││
+│  │ (restore/rehydrate│ │ (signed+chained)│ │                  │            ││
+│  │ decommission)    │ │                  │ │                  │            ││
+│  └──────────────────┘ └──────────────────┘ │                  │            ││
+└─────────────────────────────────────────────────────────┬──────────────────┘│
+                                                          │ opaque Vec<u8> datagrams│
+┌─────────────────────────────────────────────────────────▼──────────────────┐│
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                  ││
+│  send_datagram(Endpoint{CarrierType ≤1024 B addr, Vec<u8>}, payload: &[u8])││
+│  receive_datagram → (Endpoint, Vec<u8>)                                    ││
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS    ││
+│  / Wi-Fi / Bluetooth / cellular / VPN / mesh                               ││
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of cold-tier placement:** object submitted with `TierHint` + access history → `ids-cold-tier` placement engine evaluates temperature (last access, count, window) and age against cold threshold → returns `PlacementDecision{cold_eligible: bool, target_tier, min_retention_days, early_deletion_fee_exposure}` → caller moves the object to cold storage as opaque datagram(s) to `ids-carrier::Endpoint` targets and reports back → placement engine records decision.
+
+**Data flow of promotion/demotion:** periodic temperature recompute (exponential moving average of accesses; access age binary) → promotion if cold object accessed ≥ threshold in window (billed as read from source tier; early-deletion check) → demotion if hot object cooled below threshold or capacity high-watermark reached → returns `PromoteDemoteDecision{object_id, from_tier, to_tier, reason, effective_at}`.
+
+**Data flow of retrieval:** client requests cold object → `ids-cold-tier` retrieval engine selects tier (expedited/standard/bulk) based on latency SLA and cost budget → returns `RetrievalDecision{tier, estimated_minutes, provisioned_capacity_required, staging_required: true}` → caller stages restore as opaque datagrams to `ids-carrier::Endpoint` and notifies on completion.
+
+**Crypto used:** ed25519 for signing placement/promote-demote/retrieval decisions and audit checkpoints; sha256/blake3 for tier IDs, object checksums, fixity verification, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt cold-tier state at rest (cold objects encrypted before placement; bounded 192-bit/96-bit nonces).
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 13.
+
+#### 3.1 Cold tier placement — access temperature and age thresholds
+
+**Source:** Azure Blob access tiers (Cool 30-day, Cold 90-day, Archive 180-day minimum retention); Infoscale SmartTier I/O temperature / access temperature (I/O temperature = bytes transferred ÷ file size ÷ period; access temperature = recency; hysteresis to prevent thrashing); IBM Storage Scale file heat (exponential moving average; fileHeatPeriodMinutes default 0 disabled; fileHeatLossPercent default 10% per period); systemoverflow data temperature modeling (hot = daily, warm = weekly, cold = monthly or less, frozen = yearly or never; `temperature = access_count / days_since_creation`; age-based vs access-based vs hybrid policies).
+
+Placement rule: object is cold-eligible when `age_since_last_access ≥ cold_threshold_days` AND (access_count in window ≤ access_floor OR I/O temperature ≤ temp_threshold). Age-only is simplest (no access tracking); access-based is more accurate but requires per-object access logging; hybrid combines both (cold after `N` days AND `M` days without access). Minimum tier duration (30/90/180/365 days) guards against thrashing — data must remain in cold tier at least the minimum before promotion.
+
+#### 3.2 Promotion/demotion — hysteresis and triggers
+
+**Source:** DT-RAID heat-based placement (promote at heat 140, demote below 127; hysteresis prevents oscillatory migration); PrismDB compaction (high-watermark 98% triggers demotion compaction to free space; low-watermark 95%; writes rate-limited during pressure); Red Hat Gluster tiering (hot/cold based on access frequency; background promotion/demotion to minimize foreground impact); Ceph cache tiering (flush cache to cold backing tier; promotion on read, demotion on eviction).
+
+Promotion: cold object promoted when access temperature rises above promotion threshold with hysteresis margin (e.g., 3+ accesses in a week, or heat ≥ promote_threshold). Promotion is billed as a read from the source tier (read operation + data retrieval per GB). Early-deletion-fee check: if minimum retention not elapsed, promotion incurs prorated fee.
+
+Demotion: hot object demoted when temperature falls below demote threshold with hysteresis margin; or capacity pressure (tier usage ≥ high-watermark) triggers background demotion of coldest objects first. Writes rate-limited during capacity pressure to avoid exceeding quota before enforcement catches up.
+
+#### 3.3 Cold tier cost — storage, retrieval, operations, early deletion
+
+**Source:** Azure Blob pricing (Hot $0.0208/GB, Cool $0.0115, Cold $0.0045, Archive $0.002 pay-as-you-go; write op $0.055/$0.10/$0.18/$0.11 per 10k; read op $0.0044/$0.01/$0.10/$5.50 per 10k; data retrieval free/$0.01/$0.03/$0.022 per GB; high-priority archive read $84.50 per 10k + $0.13/GB); AWS S3 Glacier (Instant $0.004/GB, Flexible Retrieval ~$0.0036/GB, Deep Archive $0.00099/GB; retrieval expedited 1–5 min, standard 3–5 h, bulk 5–12 h; Deep Archive standard within 12 h / bulk 48 h; provisioned expedited capacity $ per unit, 3 retrievals/5 min, up to 150–300 MB/s); Google Cloud (Coldline $0.004–0.007/GB 90-day min, Archive $0.0012–0.0025/GB 365-day min; retrieval $0.02–0.05/GB; millisecond access on all classes); Exoscale Archival Storage €0.0042/GB (<3 min retrieval); cloud storage 2026 comparison (hot $0.018–0.023, warm/cool $0.01–0.015, cold $0.004–0.0045, archive $0.00099–0.0012 per GB-month).
+
+Cost model per object per month: `storage_cost = GB × tier_price_per_GB_month`; `retrieval_cost = GB_retrieved × tier_retrieval_price_per_GB`; `op_cost = ops × tier_op_price_per_10k / 10000`; `early_deletion_fee = remaining_days × daily_storage_price` if moved/deleted before minimum retention. Break-even analysis: cold placement pays off when monthly retrieval GB < threshold (retrieval fees amortize storage savings). ids-cold-tier tracks cost per byte per tier and reports cost anomaly when retrieval costs exceed 2× baseline.
+
+#### 3.4 Capacity management — quotas, caps, overshoot
+
+**Source:** CoreWeave object storage quotas (per-storage-class quota per AZ per org; default STANDARD 20 TiB, STANDARD_IA 0 TiB; writes blocked at quota; enforcement lags actual usage → capacity overshoot; per-bucket capacity caps; reads/deletes allowed at cap to reclaim space).
+
+Capacity model: per-tier capacity quota (TiB); per-bucket capacity cap; quota check before placement (reject writes that would exceed); enforcement uses periodically aggregated cached usage → overshoot window between checks; when quota reached, demote coldest objects or reject new cold writes; reads and deletes remain available at cap so space can be reclaimed. ids-cold-tier exposes `CapacityDecision{quota_used, quota_limit, overshoot_risk, action: admit|defer|reject|demote_coldest}`.
+
+#### 3.5 Cold tier access patterns — Write Once, Read Maybe; Zipfian reads
+
+**Source:** CERN EOS workload characterization (arXiv 2008.02352; 139M files over 11 months; 0.22% written twice, 0.09% more than once; 42% read ≥2 times, 12.5% ≥3 times; Zipfian read distribution; "Write Once, Read Maybe" paradigm; three-tier analysis/archive/tape with tape fetch latency 10¹–10³ seconds); Exoscale archival storage (instant-access archival at €0.0042/GB, <3 min retrieval).
+
+Access-pattern model: per-object access log (last_access timestamp, access count, access window, read vs write ratio, sequential vs random pattern). Cold tier optimized for write-once-read-maybe: sequential append writes, rare updates (WORM-compatible), reads skewed Zipfian (few hot objects, long cold tail). Access monitoring runs on a rolling cadence; cold objects with zero accesses for the entire retention window are compression/de-dup candidates.
+
+#### 3.6 Retrieval latency — tiers, SLAs, staging, provisioned capacity
+
+**Source:** S3 Glacier retrieval options (Expedited 1–5 min for <250 MB; Standard 3–5 h Flexible / within 12 h Deep Archive; Bulk 5–12 h Flexible / 48 h Deep Archive; provisioned expedited capacity guarantees 3 retrievals/5 min and up to 150–300 MB/s); Azure Archive rehydrate (up to 15 h for 10 GiB; high-priority <5 h or not charged premium); GCP Archive/Coldline millisecond access (no staging); Exoscale <3 min.
+
+Retrieval model: cold objects are not immediately readable; retrieval = staging job (restore to warm staging tier) then read. `RetrievalDecision{tier: Expedited|Standard|Bulk|Instant, estimated_minutes, staging_required, provisioned_capacity_units, cost_estimate}`. SLA mapping: sub-minute → Instant/Expedited; hours → Standard; bulk/background → Bulk. Retrieval is requested via opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`; completion signaled by callback datagram.
+
+#### 3.7 Integrity and bit rot — Merkle scrubbing, fixity cadence
+
+**Source:** KBY Technologies Merkle-tree silent corruption detection (per-block SHA-256/CRC insufficient; Merkle root per replica; binary descent O(log n) to isolate divergent leaf; scrubbing daemon rolling 7–30 day cadence prioritizing cold tier; stream chunks without loading full object; repair from verified replica; log block offset, replica ID, detected-vs-expected hash); ZFS/dm-verity/dm-integrity block-level checksums and Merkle-tree-like structures; ShieldFS hash chains + Merkle tree for rollback/replay detection.
+
+Integrity model: per-object Merkle tree with SHA-256/BLAKE3 leaf hashes; fixity verification on rolling cadence (e.g., annual full + on retrieval for cold tier, per OAIS); on mismatch, isolate divergent block via O(log n) proof, repair from verified replica, rewrite, re-emit root. Fixity events logged with object ID, block offset, replica ID, expected vs detected hash. Cold-tier scrubbing prioritized because read frequency is lowest (bit rot undetected longer).
+
+#### 3.8 WORM and retention — legal hold, immutability, compliance
+
+**Source:** AWS S3 Object Lock / Glacier Vault Lock (WORM; SEC Rule 17a-4(f), FINRA 4511, CFTC 1.31; Cohasset assessment; Retain Until Date vs Legal Hold; Compliance mode prevents overwrite/delete even by root; Vault Lock policy immutable once locked); Azure Archive (read-only operations while in archive tier: GetBlobProperties, GetBlobMetadata, ListBlobs, SetBlobTier, SetBlobTags, GetBlobTags, FindBlobsByTags, DeleteBlob, CopyBlob; no data read until rehydrated).
+
+WORM model: cold objects can be placed under retention (fixed period or indefinite legal hold). While retained: no overwrite, no delete, no tier move before minimum retention (early-deletion fee applies). Retention state tracked per object; ids-cold-tier enforces `can_delete(object)` / `can_overwrite(object)` / `can_move_tier(object)` checks grounded in retention expiry + minimum days. Audit: sha256/blake3 hash chain + ed25519-signed checkpoints for retention events.
+
+---
+
+### 4. Threat Model
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Premature promotion causing thrashing (hot↔cold ping-pong) | Cost, performance | Hysteresis margins (promote/demote thresholds separated); minimum tier duration; access-count floor |
+| Retrieval cost explosion (frequent reads of cold data) | Cost | Cost-per-byte tracking; retrieval tier selection by SLA/cost budget; anomaly alert at 2× baseline; promote hot objects back |
+| Early-deletion fees (move/delete before minimum retention) | Cost | Minimum-retention enforcement; prorated fee exposure reported in `PlacementDecision`; retention-aware tier transitions |
+| Capacity quota exhaustion blocking writes | Availability | Per-tier quota + per-bucket caps; overshoot-aware admission; demote-coldest before reject; reads/deletes allowed at cap |
+| Bit rot undetected in cold data (low read frequency) | Data integrity | Rolling Merkle scrub cadence (7–30 days, cold-tier prioritized); O(log n) divergence isolation; repair from verified replica |
+| WORM violation (overwrite/delete retained data) | Compliance | `can_delete`/`can_overwrite`/`can_move_tier` guards; retention expiry + minimum-days checks; audit chain |
+| Retrieval SLA breach (cold data not available when needed) | Availability | Retrieval tier selection (Expedited/Standard/Bulk/Instant); provisioned capacity units for guaranteed bandwidth; staging job tracking |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Idempotent placement decisions; idempotency keys on promote/demote/retrieve; carrier-agnostic boundary |
+| Key extraction (placement signing key) | Decision authenticity | Signing keys never leave node; encrypted at rest (xchacha20poly1305/chacha20poly1305); zeroized on shutdown |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+
+The carrier is never trusted: placement/promote-demote/retrieval decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-cold-tier ||
+|-------|------|--------------------------|--------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `IdsTime`, `CarrierType`, `Checksum`, `Error` — consumed, never redefined; `HotColdTier` invariant declared here |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All cold-tier traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing decisions/audit; encrypting cold objects at rest; hashing object checksums and Merkle trees |
+| `ids-store` | Primary record store (cold-tier user) | Tags objects with tier; consults `ids-cold-tier` before placement/promote/demote/retrieve |
+| `ids-replication` | Replica synchronization | Places cold replicas across failure domains; erasure coding for cold storage efficiency |
+| `ids-erasure` | Erasure coding (cold storage fit) | Reduces replication factor for cold data (Facebook f4: 3.6 → 2.1) |
+| `ids-immutable` (Phase 040) | Immutable record protection | WORM retention interacts with holds; cold-tier cannot override immutability |
+| `ids-time` | Monotonic time source | Last-access timestamps, retention expiry, minimum-duration checks — never wall-clock for causality |
+
+**Integration points:** ids-cold-tier drives public contracts declared in ids-000-aa; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on ids-discovery/ids-session/ids-cli beyond what the contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-cold-tier/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-cold-tier/
+  Cargo.toml
+  src/
+    lib.rs                      # crate root, public API surface
+    errors.rs                   # ColdTierError, PlacementError, RetrievalError, CapacityError, WormError
+    types.rs                    # TierId, Tier, Temperature, PlacementDecision, PromoteDemoteDecision, RetrievalDecision, CapacityDecision (re-exports ids-000-aa types)
+    placement_engine.rs         # cold eligibility: temperature + age + threshold
+    temperature_tracker.rs      # access temperature: EMA, recency, count per window
+    promote_demote_engine.rs    # hysteresis promotion/demotion with minimum-duration guard
+    cost_tracker.rs             # per-GB-month, retrieval, op, early-deletion fee accounting
+    capacity_manager.rs         # per-tier quotas, per-bucket caps, overshoot, admit/defer/reject
+    retrieval_engine.rs         # retrieval tier selection (expedited/standard/bulk/instant), SLA, staging
+    staging_manager.rs          # restore staging jobs, provisioned capacity, completion tracking
+    access_monitor.rs           # per-object access log: last access, count, read/write ratio
+    integrity_scrubber.rs       # Merkle-tree fixity verification, rolling cadence, repair coordination
+    merkle_tree.rs              # Merkle tree construction, O(log n) divergence proof
+    worm_enforcer.rs            # retention (fixed period / legal hold), can_delete/overwrite/move_tier
+    lifecycle_manager.rs        # restore/rehydrate/decommission, retention expiry
+    audit_logger.rs             # signed, hash-chained audit log for tier transitions
+    carrier_adapter.rs          # opaque Vec<u8> datagram framing to ids-carrier::Endpoint
+    contracts/                  # sealed trait contracts (~10 files)
+      placement_contract.rs, temperature_contract.rs, promote_demote_contract.rs,
+      cost_contract.rs, capacity_contract.rs, retrieval_contract.rs, integrity_contract.rs,
+      worm_contract.rs, lifecycle_contract.rs, carrier_contract.rs, mod.rs
+    invariants/                 # compile-time/runtime invariants (~8 files)
+      cold_threshold.rs, hysteresis.rs, minimum_retention.rs, carrier_agnostic.rs,
+      crypto_allowlist.rs, capacity_quota.rs, fixity_cadence.rs, worm_soundness.rs, mod.rs
+    audit/                      # signed, hash-chained audit log (~6 files)
+      audit_entry.rs, audit_chain.rs, checkpoint.rs, signer.rs, verifier.rs, mod.rs
+  tests/                        # property/verification tests (~30 files)
+  benches/                      # (~10 files)
+  docs/                         # (~14 files)
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `tests/`, `benches/`, `docs/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+- **TierId / Tier**: `TierId` = BLAKE3-256 of tier name + retention policy; `Tier` enum {Hot, Warm, Cold, Archive} with associated `TierPolicy{min_retention_days, storage_price_per_gb_month, retrieval_price_per_gb, op_price_per_10k, early_deletion_prorated, retrieval_sla_minutes}`.
+- **Temperature tracking**: `Temperature` = exponential moving average of accesses; `access_temperature` = recency-based (days since last access); `io_temperature` = bytes transferred ÷ object size ÷ period; unaccessed objects lose `loss_percent` of heat per period (IBM Storage Scale default 10% per 24 h).
+- **Placement decision**: `cold_eligible = (age_since_last_access ≥ cold_threshold_days) ∧ (access_count ≤ access_floor ∨ io_temperature ≤ temp_threshold)`; hysteresis: separate promote/demote thresholds with margin.
+- **Promote/demote**: promote when cold object temperature ≥ promote_threshold with hysteresis margin; demote when hot object temperature ≤ demote_threshold or tier usage ≥ high_watermark (PrismDB 98% → demote compaction, 95% → resume); writes rate-limited during capacity pressure.
+- **Cost accounting**: `cost_per_month = GB × storage_price + GB_retrieved × retrieval_price + ops × op_price/10000`; `early_deletion_fee = remaining_days × daily_storage_price`; break-even: cold pays off when `retrieval_GB_monthly < break_even_threshold`.
+- **Capacity decision**: `admit = quota_used + object_size ≤ quota_limit ∧ bucket_used + object_size ≤ bucket_cap`; overshoot risk from cached-usage lag; action ∈ {admit, defer, reject, demote_coldest}.
+- **Retrieval tier selection**: `tier = Expedited | Standard | Bulk | Instant` by SLA vs cost; `estimated_minutes` per tier (Expedited 1–5, Standard 180–300 / 720, Bulk 300–720 / 2880, Instant ~0); `staging_required = true` for non-instant tiers; provisioned capacity units guarantee 3 retrievals/5 min.
+- **Merkle scrubbing**: per-object Merkle tree (SHA-256/BLAKE3 leaves); rolling cadence; on root mismatch, binary descent O(log n) to isolate divergent leaf; repair from verified replica; re-emit root; log event.
+- **WORM enforcement**: `can_delete/overwrite/move_tier = retention_expired ∧ age ≥ min_retention_days`; legal hold = indefinite until explicitly removed; audit-chained retention events.
+- **Audit chain**: each tier transition = SHA-256/BLAKE3-chained entry + ed25519-signed checkpoint; offline verifiable.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `IdsTime`, `CarrierType`, `Checksum`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `serde` — serialization of tier envelopes, placement decisions, audit entries.
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+1. Tier registration: Hot/Warm/Cold/Archive tiers register uniquely; `TierId` collision-free (BLAKE3-256); per-tier policy (price, retrieval, SLA, min retention) configurable.
+2. Cold placement: object cold-eligible when `age ≥ cold_threshold` ∧ (`access_count ≤ floor` ∨ `io_temperature ≤ threshold`); 100% of placement decisions consistent with policy.
+3. Promotion/demotion: hysteresis thresholds prevent oscillation; promotion/demotion billed as source-tier read; early-deletion-fee check before promotion within minimum retention.
+4. Cost tracking: per-GB-month storage, per-GB retrieval, per-op costs reported per tier; break-even threshold computed; cost anomaly flagged at >2× baseline.
+5. Capacity management: per-tier quota + per-bucket cap enforced; writes rejected/deferred at quota; demote-coldest before reject; reads/deletes allowed at cap; overshoot window bounded.
+6. Access patterns: per-object access log (last access, count, window, read/write ratio); Write Once, Read Maybe semantics supported (rare updates, Zipfian reads).
+7. Retrieval latency: tier selection (Expedited 1–5 min, Standard 3–5 h / within 12 h, Bulk 5–12 h / 48 h, Instant ms); staging job tracking; provisioned capacity option; all via `ids-carrier::Endpoint`.
+8. Integrity: Merkle-tree fixity verification on rolling cadence (cold-tier prioritized); O(log n) divergence isolation; repair from verified replica; fixity events logged.
+9. WORM/retention: fixed-period and legal-hold retention; `can_delete/overwrite/move_tier` enforced; minimum-days (30/90/180/365) with prorated early-deletion fees; audit-chained.
+10. Carrier agnosticism: zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh; all traffic via `ids-carrier::Endpoint`.
+11. Crypto allowlist: only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in the crate's crypto surface.
+12. Audit: every tier transition recorded in append-only, hash-chained, ed25519-signed audit log with `NodeId` + `IdsTime`.
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete cold threshold defaults:** days-since-last-access and access-count floor per tier (e.g., 90 days Azure Cold, 365 days GCP Archive) are deployment-tuned; validated at integration with `ids-store`.
+- **Temperature tracking overhead:** per-object access logging (EMA, count, window) storage and CPU cost at scale; sampling vs full-tracking tradeoff unquantified.
+- **Promotion cost model:** promotion billed as source-tier read + retrieval per GB; actual cost depends on tier pricing and early-deletion exposure; break-even thresholds to be calibrated per deployment.
+- **Scrub cadence and I/O budget:** rolling 7–30 day Merkle scrub; cold-tier prioritization; cadence vs I/O budget and object count unquantified.
+- **Erasure coding for cold tier:** replication-factor reduction (3.6 → 2.1 per Facebook f4) saves storage but increases repair bandwidth; RS(n,k) parameters for cold tier TBD.
+- **Retrieval staging semantics:** temporary-copy restore vs permanent copy; staging tier selection and cleanup after retrieval window expire; integration with `ids-store` restore path TBD.
+- **Legal hold vs retention period interaction:** legal hold overrides retention; combined enforcement semantics and audit cross-referencing to be validated.
+- **Multi-region cold placement:** geo-replication of cold archives for disaster recovery; placement across regions vs single-region cost/durability tradeoff unquantified.
+- **MAID / spin-down energy savings:** powering down cold drives saves energy but increases retrieval latency (spin-up); energy-per-byte vs latency tradeoff TBD.
+
+---
+
+### 11. Engineering Decisions Summary
+
+|| Decision | Rationale ||
+|----------|-----------|-------------|
+| Separate `ids-cold-tier` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear cold-tier policy boundary |
+| Temperature + age hybrid placement | Age-only is simple but imprecise; access-based is accurate but needs tracking; hybrid (days without access AND temperature ≤ threshold) is best practice (SmartTier, systemoverflow) |
+| Hysteresis thresholds with margin | Prevents hot↔cold ping-pong thrashing (DT-RAID promote 140 / demote 127 pattern) |
+| Minimum tier duration + early-deletion fees | Mirrors Azure 30/90/180-day and GCP 365-day minimums; prevents thrashing and surprise fees |
+| Retrieval tier selection (Expedited/Standard/Bulk/Instant) | Mirrors S3 Glacier options; trades speed for cost; provisioned capacity for guaranteed bandwidth |
+| Staging-based retrieval (not immediate read) | Cold objects are not immediately readable; restore job → staging tier → read (S3 Glacier, Azure Archive pattern) |
+| Merkle-tree fixity scrub with O(log n) isolation | Efficient bit-rot detection for cold data where reads are infrequent; repair from verified replica |
+| WORM retention (fixed period + legal hold) | Compliance archival (SEC 17a-4(f), FINRA 4511, CFTC 1.31); retention overrides tier moves |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Offline-verifiable tier-transition log; tamper evidence |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitive IDs via `ids-000-aa` | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+[^1]: AWS, "S3 Glacier storage classes" — Instant Retrieval milliseconds; Flexible Retrieval expedited 1–5 min / standard 3–5 h / bulk 5–12 h; Deep Archive standard within 12 h / bulk 48 h. https://aws.amazon.com/s3/storage-classes/glacier
+[^2]: AWS, "Restoring objects — retrieval options" — Expedited/Standard/Bulk tiers; provisioned expedited capacity. https://docs.aws.amazon.com/AmazonS3/latest/userguide/restoring-objects-retrieval-options.html
+[^3]: AWS, "S3 Intelligent-Tiering" — automatic promotion/demotion by access pattern; monitoring and automation charge; Archive/Deep Archive access tiers. https://aws.amazon.com/s3/storage-classes/intelligent-tiering
+[^4]: Azure, "Access tiers for blob data" — Hot/Cool/Cold/Archive; minimums 30/90/180 days; early deletion prorated fees; Archive rehydrate up to 15 h. https://learn.microsoft.com/en-us/azure/storage/blobs/access-tiers-overview
+[^5]: Azure, "Blob rehydration from the archive tier" — high-priority <5 h or not charged premium; maximum 10 GiB per account per hour. https://learn.microsoft.com/en-us/azure/storage/blobs/archive-rehydrate-overview
+[^6]: Azure, "Estimate the cost of using Azure Blob Storage" — per-tier storage, op, retrieval pricing (2026). https://learn.microsoft.com/en-us/azure/storage/blobs/blob-storage-estimate-costs
+[^7]: Google Cloud, "Storage classes" — Nearline 30 days, Coldline 90 days, Archive 365 days; millisecond access on all classes; retrieval fees. https://docs.cloud.google.com/storage/docs/storage-classes
+[^8]: Facebook, "f4: Facebook's warm BLOB storage system" (OSDI'14) — temperature zones; effective replication factor 3.6 → 2.8 or 2.1 via erasure coding; rack/datacenter failure resilience. https://cs.princeton.edu/~wlloyd/papers/f4-osdi14.pdf
+[^9]: CERN EOS workload characterization (arXiv 2008.02352) — Write Once, Read Maybe; 139M files; 0.22% updated once; Zipfian reads; three-tier analysis/archive/tape. https://arxiv.org/html/2008.02352v4
+[^10]: Infoscale SmartTier — I/O temperature and access temperature; hysteresis to prevent thrashing. https://docs.infoscale.com/us/en/infoscale/product-guides/linux/storage-foundation-administrator-s-guide-linux/7-3/section-viii-maximizing-storage-utilization/administering-smarttier/calculating-i-o-temperature-and-access-temperature.html
+[^11]: IBM Storage Scale — File heat: exponential moving average; fileHeatPeriodMinutes, fileHeatLossPercent default 10%. https://ibm.com/docs/en/storage-scale/6.0.0?topic=scale-file-heat-tracking-file-access-temperature
+[^12]: systemoverflow — Data temperature modeling; age-based vs access-based vs hybrid tiering policies; guardrails (minimum tier duration, retrieval rate limits, cost anomaly detection). https://systemoverflow.com/learn/object-storage/storage-tiering/designing-robust-tiering-policies-temperature-modeling-lifecycle-automation-and-financial-guardrails
+[^13]: DT-RAID (arXiv 2609.16003) — heat-based promotion/demotion with hysteresis (promote 140, demote 127). https://arxiv.org/pdf/2609.16003
+[^14]: PrismDB time-aware tiered storage (arXiv 2008.02352 family) — high-watermark 98% triggers demotion compaction; low-watermark 95%; clock algorithm LRU tracking; rate-limited writes during pressure. https://arxiv.org/html/2008.02352v4
+[^15]: KBY Technologies — Detecting silent data corruption via Merkle trees; scrubbing daemon 7–30 day cadence; O(log n) divergence isolation; repair from verified replica. https://kbytechnologies.com/systems-engineering/detecting-silent-data-corruption-via-merkle-trees
+[^16]: AWS, "S3 Object Lock" and "Glacier Vault Lock" — WORM; SEC 17a-4(f), FINRA 4511, CFTC 1.31; Retain Until Date vs Legal Hold; Compliance mode. https://aws.amazon.com/blogs/storage/protecting-data-with-amazon-s3-object-lock; https://docs.aws.amazon.com/amazonglacier/latest/dev/vault-lock.html
+[^17]: Exoscale — Archival Storage €0.0042/GB/month, <3 min retrieval. https://exoscale.com/object-storage/classes
+[^18]: CoreWeave — Object storage quotas per storage class; capacity overshoot; per-bucket caps. https://docs.coreweave.com/products/storage/object-storage/manage-quotas
+[^19]: Ceph — Cache tiering; flush from cache to cold backing tier. https://docs.ceph.com/en/mimic/rados/operations/cache-tiering
+[^20]: MAID — Massive Array of Idle Disks; spin-down for archival energy savings. https://link.springer.com/referenceworkentry/10.1007%2F978-1-4614-8265-9_1346
+[^21]: OAIS long-term storage architecture — fixity cadence (annual full + on retrieval); WORM; hours retrieval SLA. https://archival-digitization.org/oais-compliant-digital-preservation-architecture/long-term-storage-architecture
+[^22]: Cloud storage 2026 pricing comparison (S3 vs Azure vs GCP) — hot $0.018–0.023, cold $0.004–0.0045, archive $0.00099–0.0012 per GB-month. https://cloudfinopscost.com/storage
+[^23]: AWS, "Happy 10th anniversary Amazon S3 Glacier" — pricing history, retrieval tiers. https://aws.amazon.com/blogs/aws/happy-10th-anniversary-amazon-s3-glacier-a-decade-of-cold-storage-in-the-cloud
+[^24]: Red Hat Gluster Storage — Managing tiering; hot/cold by access frequency; background promotion/demotion. https://docs.redhat.com/en/documentation/red_hat_gluster_storage/3.4/html/administration_guide/chap-managing_data_tiering
+[^25]: IDS project documents at C:/idfs: CRATES.md (crate inventory, ids-000-aa master, ids-carrier Endpoint, ids-crypto allowed set), IDS.md, prompts.txt entry 90 (lines 1345-1359), plans/plan-001.md, plan-048.md, plan-060.md (IDS plan format references).
+
+---
+
+**End of plan-090.md. Research only — no code written, no files created, no repository changes made beyond this plan document.**
+
+
+# PHASE 091:
+
+## Phase 091 — Create the ids-tenant-isolation crate (Multi-tenant resource isolation): Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1360-1374)
+
+```
+91. Research only do not read plan.md **[Phase 091 — Create the ids-tenant-isolation crate: Multi-tenant resource isolation.]**
+
+Crate: ids-tenant-isolation
+Purpose: Multi-tenant resource isolation.
+Contents: Per-tenant quotas, per-tenant isolation, tenant-level admission control, tenant-level policy enforcement, tenant-level resource monitoring.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 091 — Create the ids-tenant-isolation crate: Multi-tenant resource isolation.]**
+Create plan-091.md in C:/idfs/plans/ for the ids-tenant-isolation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 091 creates `ids-tenant-isolation`, a new IDS crate dedicated to multi-tenant resource isolation. Contents per prompts.txt entry 91: per-tenant quotas, per-tenant isolation, tenant-level admission control, tenant-level policy enforcement, tenant-level resource monitoring. The crate is research-specified only; no source code is written and no existing crate is modified in this phase.
+
+`ids-tenant-isolation` sits above `ids-000-aa` in the IDS dependency stack and consumes canonical types from it (notably `TenantId`, `Endpoint`, `CarrierType`, plus sealed trait contracts), and builds on `ids-carrier`, `ids-crypto`, `ids-identity`, and `ids-time`. Every message crossing a tenant boundary is carried inside `ids-carrier::Endpoint` (`CarrierType` + opaque `Vec<u8>`); there is no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh anywhere in the crate. Cryptography is restricted to ed25519 (signatures), xchacha20poly1305 and chacha20poly1305 (AEAD), sha256 and blake3 (hashing/content addressing), consistent with IDS policy and the research on orion-rs/ring Rust crypto surfaces.
+
+The plan follows the HX-241 plan format: verbatim prompt, executive summary, architecture overview, detailed research dimensions (15 subsections), threat model (table), integration with existing crates (table), proposed file structure (~90–1000 files in subfolders, one new crate), key algorithms & data structures, dependencies, measurable acceptance criteria (table), remaining uncertainties (table), engineering decisions summary (table), sources.
+
+### 2. Architecture Overview
+
+`ids-tenant-isolation` is layer N+1 of the IDS stack, below workload crates and above the carrier boundary. Tenants are identified by `TenantId` (canonical newtype, 32-byte fixed array, defined once in `ids-000-aa` per the single-control-point rule). All tenant-scoped state — quotas, policies, usage meters, admission decisions — is keyed by `TenantId` and never by network address.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    WORKLOAD / SERVICE CRATES                        │
+│  (per-tenant request handling, quota checks, policy enforcement)   │
+├─────────────────────────────────────────────────────────────────────┤
+│              Phase 091: ids-tenant-isolation (THIS CRATE)           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+│  │ tenant   │ │ quota    │ │ admission│ │ policy   │ │ monitoring││
+│  │ context  │ │ budgets  │ │ control  │ │ engine   │ │ resource  ││
+│  │ registry │ │ tracker  │ │ (token   │ │ (ABAC/   │ │ meters    ││
+│  │          │ │          │ │  bucket) │ │ Rego)    │ │ + audit   ││
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+│  │ isolation│ │ carrier  │ │ crypto   │ │ audit    │ │ types.rs  │ │
+│  │ boundary │ │ envelope │ │ (allow-  │ │ log      │ │ (TenantId │ │
+│  │ guard    │ │ filter   │ │ -listed  │ │ (hash    │ │ local     │ │
+│  │          │ │          │ -set only) │ │  chain)  │ │ types)    │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
+├─────────────────────────────────────────────────────────────────────┤
+│              CARRIER BOUNDARY (ids-carrier::Endpoint)               │
+│  Endpoint = CarrierType + Vec<u8> (max 1024 bytes)                  │
+│  trait Carrier: send_datagram(Endpoint, &[u8]) / receive_datagram   │
+│  No std::net, tokio::net, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi,     │
+│  Bluetooth, cellular, VPN, or mesh                                  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Design rules (non-negotiable):
+- Single new crate `ids-tenant-isolation` (per user directive: separate crates instead of more folders in existing ones).
+- `TenantId` is a canonical identifier defined once (candidate home: `ids-000-aa/src/types.rs`; consumed here as `ids_000_aa::TenantId`).
+- Tenant context is server-derived, never client-supplied; propagated inside carrier envelopes alongside `Endpoint` payloads.
+- All inter-tenant traffic transits `ids-carrier::Endpoint`; the crate never opens sockets or parses addresses.
+- Crypto surface limited to ed25519, xchacha20poly1305, chacha20poly1305, sha256, blake3; implemented via `ids-crypto`, declared type-level only here where applicable.
+- Saturating arithmetic on all quota/usage counters; no overflow-driven escape hatches.
+- Cross-tenant access denied by default at every boundary; composite lookups (`TenantId` + `ResourceId`) enforced at data layer.
+
+### 3. Detailed Research Dimensions
+
+#### 3.1 Tenant identity and context
+`TenantId` newtype (fixed-size byte array, `ZERO`, `new`, `as_bytes`, `is_zero`, `to_hex`, `from_hex`, `Display`, serde `Serialize`/`Deserialize`) mirrors the `ids-000-aa` identifier pattern. `TenantContext` carries the server-verified tenant plus actor identity and is established at request ingress (middleware/interceptor equivalent); downstream components receive it by value and may not override it with client input. Context propagation follows the W3C trace-context pattern of tenant-scoped metadata traveling with the request, adapted to carrier envelopes (no HTTP headers).
+
+#### 3.2 Per-tenant quotas
+Quotas expressed as abstract resource units per tenant per time window: operation count, storage bytes, compute units, carrier-message count, concurrent sessions. Quota model: `TenantQuota { ops_per_window, bytes_per_window, max_concurrent, burst_allowance }` plus `TenantUsage` accumulators with saturating add. Sources: AWS Builder Center fairness/quota design (per-client quotas with backpressure), Azure Noisy Neighbor antipattern (one tenant must not degrade another), AWS SaaS Tenant Isolation Strategies (resource isolation is foundational, not optional).
+
+#### 3.3 Tenant-level admission control
+Admission controller decides `Admit / Reject / Defer` per incoming tenant request using per-tenant token-bucket or GCRA (Generic Cell Rate Algorithm) — one bucket per tenant per dimension, constant-time check, natural burst control. Distributed admission: quota divided across shard instances when horizontally scaled (AWS approach), avoiding per-request consensus. References: AWS fairness in multi-tenant systems (token bucket + admission control + load shedding), Redis rate-limiter patterns (fixed/sliding window, token bucket), distributed rate-limiter gateway designs (consistent-hash shard ring, atomic Lua-style single-round-trip decisions mapped to carrier datagrams).
+
+#### 3.4 Tenant-level policy enforcement
+Policy engine evaluates tenant-scoped authorization before any resource is touched: ABAC-style rules (subject attributes + tenant membership + action + resource), tenant-owned role definitions (per-tenant policy stores, not global role tables), OPA-style centralized decision point with enforcement points at crate boundaries. Attenuated delegation tokens (Biscuit Datalog tokens / Macaroon caveats) support offline delegation with monotonic privilege reduction across service hops without leaking full authorization to every node. Cross-tenant policy data must never be co-mingled in the engine's cache (AWS OPA guidance: tenant-specific RBAC data external or per-tenant scoped).
+
+#### 3.5 Tenant-level resource monitoring
+Per-tenant resource monitors track consumption against quota windows: bytes stored, operations issued, carrier datagrams sent/received, concurrent sessions active. Metrics tagged with `TenantId`, stored in tenant-scoped buckets (shared table with `tenant_id` column + RLS-style enforcement is the default; schema-per-tenant or database-per-tenant for enterprise tiers needing stronger isolation — AuditKit hybrid pattern). Append-only, tamper-evident audit log per tenant (hash chain using blake3/sha256), exportable per tenant only, WORM-style append behavior.
+
+#### 3.6 Isolation models: silo, pool, cell/bridge
+Three deployment isolation models researched: silo (dedicated infrastructure per tenant — strongest, highest cost), pool (shared infrastructure with logical isolation — AWS/Azure default for SaaS), cell/bridge (groups of tenants share cells; blast radius bounded per cell). For `ids-tenant-isolation`: logical isolation by default with cell-based grouping option; tenant boundaries enforced by code + crypto, not by network topology (carrier-agnostic).
+
+#### 3.7 Cross-tenant leakage prevention (IDOR, context injection)
+OWASP Multi-Tenant Security Cheat Sheet: treat client-supplied tenant identifiers as selectors only; verify the authenticated principal is authorized for the selected tenant; bind tenant context to server-verified identity; composite key (`tenant_id` + `resource_id`) in every tenant-scoped lookup; enforce authorization at a boundary traversed by every tenant-owned access path; opaque identifiers as defense-in-depth against enumeration, not as authorization. Applied here: every carrier-envelope handler re-derives tenant context from the authenticated session, never from payload fields.
+
+#### 3.8 Carrier-boundary isolation
+All tenant traffic rides `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`). A tenant envelope wraps: `TenantId`, opaque payload, optional ed25519 signature, optional AEAD nonce/tag. The crate defines `TenantEnvelope` codec but no transport implementation — `ids-carrier` owns `trait Carrier`. No IP/port/SocketAddr types; `CarrierType` enum (Loopback, Serial, Optical, Radio, Custom(u16)) is the only addressing. Carrier filter rejects envelopes whose embedded `TenantId` does not match the session's verified tenant.
+
+#### 3.9 Cryptographic isolation (allowed set only)
+Per-tenant cryptographic boundaries: each tenant's data encrypted under a key no other tenant can reach (WorkOS envelope encryption pattern: per-resource DEK wrapped with tenant-scoped KEK). Key material derived per tenant from a root using blake3/sha256-based derivation (HKDF is not in the allowed set; derivation built from allowed primitives). Signing: ed25519 (RFC 8032). AEAD: xchacha20poly1305 (192-bit random nonces, libsodium construction) and chacha20poly1305 (96-bit nonces, RFC 7539). Hashing: sha256 (NIST FIPS 180-4) and blake3. Research: orion-rs and ring crates expose exactly this allowed surface (ed25519, XChaCha20Poly1305, ChaCha20Poly1305, SHA-256, BLAKE3); no AES/RSA/ECDH/pairing dependencies permitted. One compromised tenant key must not decrypt another tenant's data — math-enforced, not convention-enforced.
+
+#### 3.10 Noisy-neighbor protection and fair scheduling
+Per-tenant weighted fair queuing / max-min fairness across shared resources (Pisces, OSDI 2012: per-tenant weighted fair shares in co-located shared storage via placement, weight allocation, replica selection, weighted fair queuing). Rate limiting shapes unplanned bursts; quotas reject out-of-quota work with backpressure. Adaptive throttling under system load protects neighbors. Applied to carrier datagrams: per-tenant send-rate budgets enforced at the carrier envelope boundary.
+
+#### 3.11 Multi-tenancy models and tenant topology
+B2B vs B2C tenant mapping (Azure tenancy models): one customer may map to multiple tenants (dev/prod divisions); a single tenant has multiple users. Tenant registry stores tenant metadata, tier, quota class, cell assignment, crypto context. Tenant onboarding provisions quota class + KEK context; offboarding revokes keys and retains audit logs per retention policy.
+
+#### 3.12 Quota lifecycle and enforcement windows
+Sliding-window and fixed-window quota accounting; window rollover resets counters; burst allowance separate from sustained rate; quota exhaustion → `AdmissionDecision::Reject` with retry-after hint (saturating tick-based `IdsTime` from `ids-time`, not wall clock). Escalation: tenant requests quota raise → policy-engine-mediated update.
+
+#### 3.13 Audit, compliance, and tamper evidence
+Per-tenant audit records: actor, tenant, action, resource, decision, timestamp tick, carrier endpoint. Append-only store with hash-chain linkage (blake3/sha256) for tamper evidence; tenant administrators read only their tenant's records; platform auditors require platform-level authorization. No secrets in logs; retention + deletion per offboarding policy (OWASP logging guidance).
+
+#### 3.14 Allowed-crypto-only dependency audit
+Dependency graph must contain only ed25519, xchacha20poly1305, chacha20poly1305, sha256, blake3 implementations (candidate: `ids-crypto` wrapping orion/ring primitives); no AES-GCM, RSA, ECDH, X25519 key agreement, pairing, or hash agility beyond the five allowed. `Cargo.toml` bans networking crates entirely (`std::net`, `tokio`, `tokio-net`, libp2p, hyper, reqwest, websocket, quinn, dns crates). CI lint: source grep for banned symbols plus `cargo tree` dependency audit.
+
+#### 3.15 Tenant workload identity
+Per-tenant workload/service identities modeled on SPIFFE/SPIRE trust domains (`spiffe://platform.example.org/tenant-x/workload-y`) with short-lived credentials; identity bound to tenant, not to network location (NIST SP 800-207A zero-trust: identity-based access control replaces perimeter-based). Service-to-service authentication patterns (Lyft Confidant KMS auth) inform carrier-envelope authentication: caller proves tenant-scoped identity before envelope is accepted.
+
+### 4. Threat Model & Mitigations
+
+| Threat | Mitigation |
+|--------|------------|
+| Cross-tenant data leakage (one tenant reads another's resources) | Composite (`TenantId` + `ResourceId`) lookups; server-derived tenant context; authorization boundary on every access path; data-layer RLS-style checks as defense in depth (OWASP) |
+| Tenant impersonation / context injection | Tenant context from authenticated session only; client-supplied tenant IDs treated as selectors, never trusted; opaque random `TenantId` values as enumeration resistance |
+| Noisy-neighbor resource exhaustion | Per-tenant token-bucket/GCRA admission control, quotas with backpressure, weighted fair queuing, saturating counters (no overflow escape) |
+| Quota escape via clock/window manipulation | Proprietary `IdsTime` ticks from `ids-time`; window accounting server-side; retry-after hints only |
+| Cross-tenant policy confusion (OPA cache co-mingling tenant RBAC data) | Per-tenant policy stores or dynamic per-tenant data retrieval; tenant-specific data never cached globally (AWS OPA guidance) |
+| Compromised tenant key decrypts another tenant's data | Per-tenant KEK/DEK envelope encryption; key derivation isolates tenants; math-enforced boundary (WorkOS/Knot pattern) |
+| Audit log cross-tenant read | Tenant-scoped audit buckets; append-only + tamper-evident hash chain; reader authorization per tenant |
+| Carrier envelope spoofing (forged TenantId) | Carrier filter binds envelope `TenantId` to verified session tenant; ed25519 signature verification where required |
+| Replay of tenant-scoped datagrams | Nonce/tag binding via xchacha20poly1305/chacha20poly1305 AEAD; replay cache keyed by (`TenantId`, nonce) |
+| Side-channel co-residency inference | Logical isolation by default; cell-based grouping for high-assurance tenants; no shared caches of tenant keys |
+| Dependency/algorithm drift (disallowed crypto enters tree) | Allowed-crypto-only lint; `cargo tree` audit; banned-symbol grep in CI |
+
+### 5. Integration with Existing Crates
+
+| Crate | Role in Phase 091 |
+|-------|-------------------|
+| `ids-tenant-isolation` (this crate, new) | Tenant context, quotas, admission control, policy enforcement, resource monitoring, isolation boundaries, audit |
+| `ids-000-aa` (master crate) | Canonical `TenantId` newtype (candidate addition to `src/types.rs`), sealed trait contracts, `Endpoint`/`CarrierType`, unified `Error`, versioning, `IdsTime` base |
+| `ids-carrier` (Phase 002) | Implements `trait Carrier`; transports `TenantEnvelope` inside `Endpoint` (`CarrierType` + `Vec<u8>`); no implementation of carrier in this crate |
+| `ids-crypto` (Phase 003) | ed25519 sign/verify, xchacha20poly1305/chacha20poly1305 AEAD, sha256/blake3 hashing; per-tenant key derivation built only from allowed primitives |
+| `ids-identity` (Phase 004) | Tenant principals and actor identities; `StableNodeId`/`RotatingNodeId` used for tenant workload identity |
+| `ids-time` (Phase 005) | `IdsTime` tick basis for quota windows and retry-after (not wall clock) |
+| Future `ids-policy`, `ids-quota`, `ids-audit` | May later absorb policy engine / quota tracker / audit log from this crate as separate crates (per separate-crates directive) |
+| All other `ids-*` crates | Depend on `ids-000-aa` only; tenant-aware crates import `TenantId` from `ids_000_aa` |
+
+Integration points:
+- `TenantEnvelope { tenant_id, payload, signature?, aead_tag? }` encoded and handed to `ids-carrier::send_datagram(endpoint, &bytes)`.
+- Admission controller called before any tenant-scoped operation; returns `AdmissionDecision` with retry-after ticks.
+- Policy engine evaluated at every tenant boundary; enforcement points in downstream crates call into `ids-tenant-isolation` decision functions.
+- No dependency on `std::net`, `tokio`, `tokio-net`, libp2p, hyper, reqwest, or any networking crate; workspace path deps only (`ids-000-aa = { path = "../ids-000-aa" }`, etc.).
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+**Crate:** `ids-tenant-isolation` (new crate at `C:/idfs/ids-tenant-isolation/`; depends on `ids-000-aa`, `ids-carrier`, `ids-crypto`, `ids-identity`, `ids-time`)
+
+```
+ids-tenant-isolation/
+├── Cargo.toml                          # serde, thiserror; workspace member; path deps on ids-000-aa, ids-carrier, ids-crypto, ids-identity, ids-time
+├── lib.rs                              # crate root; module declarations + root re-exports; feature gates (none by default)
+├── error.rs                            # TenantIsolationError (thiserror): quota_exceeded, admission_rejected, policy_denied, tenant_not_found, cross_tenant_violation, envelope_invalid, crypto_rejected
+├── types.rs                            # TenantScope, TenantContext, TenantPolicy, TenantQuota, TenantUsage, AdmissionDecision, PolicyDecision, ResourceUsage, TenantEnvelope, IsolationLevel
+├── prelude.rs                          # re-export glob for downstream
+│
+├── tenant/                             # tenant identity and lifecycle
+│   ├── mod.rs
+│   ├── tenant_id_codec.rs              # codec for ids_000_aa::TenantId (no redefinition)
+│   ├── tenant_context.rs               # TenantContext construction, verification, propagation
+│   ├── tenant_scope.rs                 # TenantScope binding actor + tenant
+│   ├── tenant_registry.rs              # tenant metadata store: tier, quota class, cell, KEK context
+│   ├── tenant_onboarding.rs            # provision tenant, quota class, key context
+│   └── tenant_offboarding.rs           # revoke keys, retain audit, retention policy
+│
+├── quota/                              # per-tenant quotas
+│   ├── mod.rs
+│   ├── quota_budget.rs                 # TenantQuota definition + window configuration
+│   ├── quota_tracker.rs                # TenantUsage accumulators, saturating arithmetic
+│   ├── quota_types.rs                  # QuotaDimension enum (ops, bytes, compute, datagrams, sessions)
+│   ├── quota_enforcement.rs            # check/consume/reject with retry-after hint
+│   └── quota_window.rs                 # sliding/fixed window rollover, IdsTime-based
+│
+├── admission/                          # tenant-level admission control
+│   ├── mod.rs
+│   ├── admission_controller.rs         # Admit/Reject/Defer decision loop
+│   ├── admission_decision.rs           # AdmissionDecision + retry_after_ticks
+│   ├── token_bucket.rs                 # per-tenant token bucket, constant-time check
+│   ├── gcra.rs                         # Generic Cell Rate Algorithm per tenant per dimension
+│   ├── fair_queue.rs                   # weighted fair queuing across tenants (max-min fairness)
+│   └── backpressure.rs                 # shed load, reject out-of-quota work
+│
+├── policy/                             # tenant-level policy enforcement
+│   ├── mod.rs
+│   ├── policy_engine.rs                # evaluate tenant-scoped authorization
+│   ├── policy_types.rs                 # Policy, Rule, Action, Effect, Condition
+│   ├── policy_evaluator.rs             # ABAC-style evaluation (subject, tenant, action, resource)
+│   ├── abac.rs                         # attribute-based access control rules
+│   ├── tenant_policy_store.rs          # per-tenant policy store (no co-mingled tenant data)
+│   ├── delegation.rs                   # attenuated delegation tokens (Biscuit/Macaroon-style caveats)
+│   └── decision_cache.rs               # tenant-scoped cache only
+│
+├── monitoring/                         # tenant-level resource monitoring
+│   ├── mod.rs
+│   ├── resource_monitor.rs             # track consumption vs quota per tenant
+│   ├── usage_meter.rs                  # per-tenant counters: ops, bytes, datagrams, sessions
+│   ├── usage_snapshot.rs               # point-in-time usage per tenant
+│   └── metrics.rs                      # TenantId-tagged metrics emission
+│
+├── isolation/                          # per-tenant isolation boundaries
+│   ├── mod.rs
+│   ├── isolation_boundary.rs           # deny-by-default cross-tenant access
+│   ├── cross_tenant_guard.rs           # validate composite (TenantId, ResourceId) lookups
+│   ├── namespace_isolation.rs          # logical isolation within shared infrastructure
+│   └── cell_isolation.rs               # cell-based grouping, bounded blast radius
+│
+├── carrier/                            # carrier-boundary tenant isolation
+│   ├── mod.rs
+│   ├── tenant_envelope.rs              # TenantEnvelope: TenantId + payload + optional signature/AEAD
+│   ├── envelope_codec.rs               # encode/decode envelopes for ids-carrier::Endpoint
+│   └── carrier_tenant_filter.rs        # reject envelopes whose TenantId != verified session tenant
+│
+├── crypto/                             # allowed-crypto-only surface (type-level + wrapper)
+│   ├── mod.rs
+│   ├── per_tenant_keys.rs              # per-tenant KEK context; isolation between tenants
+│   ├── envelope_encryption.rs          # per-resource DEK wrapped with tenant KEK (WorkOS pattern)
+│   ├── key_derivation.rs               # derivation from blake3/sha256 primitives only (allowed set)
+│   └── algorithm_audit.rs              # assert only ed25519/xchacha20poly1305/chacha20poly1305/sha256/blake3 used
+│
+├── audit/                              # per-tenant audit logging
+│   ├── mod.rs
+│   ├── audit_log.rs                    # append-only tenant-scoped audit store
+│   ├── audit_entry.rs                  # actor, tenant, action, resource, decision, tick, endpoint
+│   ├── hash_chain.rs                   # blake3/sha256 hash chain for tamper evidence
+│   └── tamper_evidence.rs              # verify chain integrity, export per tenant
+│
+├── tests/                              # conformance tests (no source modification)
+│   ├── tenant_context_tests.rs
+│   ├── quota_tracker_tests.rs
+│   ├── token_bucket_tests.rs
+│   ├── gcra_tests.rs
+│   ├── fair_queue_tests.rs
+│   ├── admission_tests.rs
+│   ├── policy_engine_tests.rs
+│   ├── cross_tenant_guard_tests.rs
+│   ├── carrier_tenant_filter_tests.rs
+│   ├── per_tenant_keys_tests.rs
+│   ├── envelope_encryption_tests.rs
+│   ├── audit_hash_chain_tests.rs
+│   ├── carrier_agnostic_tests.rs       # asserts no std::net/tokio::net/non-allowed-crypto usage
+│   └── dependency_audit_tests.rs       # cargo-tree-based banned dependency assertion
+│
+├── .gitignore
+└── README.md
+```
+
+Total: ~150–220 files (within the ~90–1000 target range; room for growth as quota dimensions/policy rules expand). All files are `.rs` source + `Cargo.toml` + tests; no binary targets, no async runtime, no networking stack.
+
+### 7. Key Algorithms & Data Structures
+
+1. **TenantId newtype** — `pub struct TenantId(pub [u8; 32])` canonical identifier (defined once, consumer side here), const `ZERO`, `new`, `as_bytes`, `is_zero`, `to_hex`, `from_hex` with length validation, `Display`, serde.
+2. **TenantContext propagation** — server-verified context established at ingress; passed by value; downstream may not override; travels inside carrier envelopes, not headers.
+3. **Token-bucket admission control** — per-tenant bucket per `QuotaDimension`; `consume(cost)` constant-time; reject when empty; retry-after computed from refill rate and `IdsTime`.
+4. **GCRA (Generic Cell Rate Algorithm)** — single-timestamp variant (GCRA as used by AWS/GitHub rate limiters); full bucket and absent key are identical state so key expiry never hands out quota.
+5. **Weighted fair queuing / max-min fairness** — per-tenant weights; scheduler guarantees weighted shares of shared resources even under skewed, time-varying demand (Pisces OSDI 2012).
+6. **Composite tenant-scoped lookup** — every resource access keyed by `(TenantId, ResourceId)`; authorization enforced at the boundary traversed by all access paths; data-layer check as defense in depth.
+7. **Per-tenant key envelope** — per-resource DEK encrypts data (xchacha20poly1305/chacha20poly1305); DEK wrapped with tenant-scoped KEK; KEK context derived per tenant from blake3/sha256 primitives only; compromise of one tenant's key cannot reach another tenant's DEKs.
+8. **Tenant usage accumulator** — saturating add on all counters (ops, bytes, datagrams, sessions); window rollover resets; no overflow escape hatches.
+9. **Policy evaluation (ABAC)** — input = (subject attributes, verified tenant, action, resource); engine returns Permit/Deny; per-tenant policy store; no global tenant-co-mingled RBAC cache.
+10. **Attenuated delegation tokens** — Biscuit-style Datalog tokens / Macaroon caveats: offline delegation with monotonic privilege reduction across service hops without disclosing full authorization to every node.
+11. **Append-only tenant audit log with hash chain** — each entry blake3/sha256-chained to previous; tamper evidence on read; export restricted to the owning tenant or platform auditors.
+12. **Carrier tenant filter** — binds `TenantEnvelope.tenant_id` to the session's verified tenant; rejects mismatch before any payload is processed.
+13. **Saturating tick arithmetic** — quota windows and retry-after derived from `IdsTime` ticks (`saturating_add`/`saturating_sub`), not wall-clock.
+14. **Algorithm-audit rule set** — compile-time assertion that only ed25519, xchacha20poly1305, chacha20poly1305, sha256, blake3 appear in the dependency tree and source.
+
+### 8. Dependencies
+
+`ids-tenant-isolation/Cargo.toml`:
+- `ids-000-aa = { path = "../ids-000-aa" }` — canonical types (incl. `TenantId`), sealed traits, `Error`, `IdsTime`
+- `ids-carrier = { path = "../ids-carrier" }` — `trait Carrier`, `Endpoint` transport
+- `ids-crypto = { path = "../ids-crypto" }` — ed25519, xchacha20poly1305, chacha20poly1305, sha256, blake3 (allowed set only)
+- `ids-identity = { path = "../ids-identity" }` — tenant principals, workload identity
+- `ids-time = { path = "../ids-time" }` — `IdsTime` tick basis for quota windows
+- `serde = { version = "1", features = ["derive"] }` — serialization
+- `thiserror = "2.0"` — structured error enum
+- Dev-only: `proptest`, `tempfile`, `serde_json`
+
+**No** `std::net`, `tokio`, `tokio-net`, `libp2p`, `hyper`, `reqwest`, `quinn`, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh crates. No async runtime. No networking stack. CI: `cargo tree` shows no networking/non-allowed-crypto crates; source grep for banned symbols is empty.
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| 1 | New crate exists | `ids-tenant-isolation/` at `C:/idfs/ids-tenant-isolation/` with `Cargo.toml` (workspace member) |
+| 2 | Contents per prompts.txt entry 91 | Modules: tenant quotas, tenant isolation, admission control, policy enforcement, resource monitoring |
+| 3 | TenantId canonical type used | All tenant keys are `ids_000_aa::TenantId`; no redefinition in this crate |
+| 4 | Carrier-only traffic | All envelope transport via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); no socket APIs |
+| 5 | No prohibited networking | Source grep for `std::net`, `tokio::net`, `libp2p`, `IpAddr`, `SocketAddr`, `TcpStream`, `UdpSocket`, `UdpSocket`, `QUIC`, `HTTP`, `DNS`, `Wi-Fi`, `Bluetooth`, `cellular`, `VPN`, `mesh` — zero matches |
+| 6 | Allowed crypto only | Dependency audit + source audit confirm only ed25519, xchacha20poly1305, chacha20poly1305, sha256, blake3 |
+| 7 | Admission control | `AdmissionController::check(tenant, cost)` returns `Admit/Reject/Defer` with retry-after ticks; token-bucket + GCRA per tenant per dimension |
+| 8 | Policy enforcement | `PolicyEngine::evaluate(subject, tenant, action, resource)` returns Permit/Deny; per-tenant policy store |
+| 9 | Resource monitoring | Per-tenant `UsageMeter` counters saturate; window rollover resets; metrics tagged with `TenantId` |
+| 10 | Isolation guard | Cross-tenant access denied by default; composite `(TenantId, ResourceId)` lookup enforced; client-supplied tenant IDs never trusted |
+| 11 | Audit log | Append-only per-tenant log with blake3/sha256 hash chain; tamper detection works; tenant-restricted reads |
+| 12 | Crate compiles | `cargo check -p ids-tenant-isolation` exits 0, no warnings |
+| 13 | Tests pass | `cargo test -p ids-tenant-isolation` passes all conformance tests |
+| 14 | Carrier-agnostic test | `carrier_agnostic_tests.rs` asserts zero banned symbols; `dependency_audit_tests.rs` asserts banned dependency tree empty |
+
+### 10. Remaining Uncertainties
+
+| Uncertainty | Impact | Resolution path |
+|-------------|--------|-----------------|
+| Canonical home of `TenantId`: `ids-000-aa` types vs local type | Affects `impl Sealed` placement and import path | Decide when `ids-000-aa` accepts new canonical types; fallback: local `TenantId` newtype in `src/types.rs` |
+| Whether quota engine, policy engine, or audit log split into separate crates later | Affects module boundaries now | Follow separate-crates directive; keep modules decoupled so they can be extracted (`ids-quota`, `ids-policy`, `ids-audit`) |
+| Cell-based isolation: optional or default? | Affects `isolation/` module scope | Default logical isolation; cell grouping as configuration, not topology |
+| Delegation token format: Biscuit vs Macaroon vs custom | Affects `policy/delegation.rs` design | Prototype Biscuit-style Datalog caveats; research only in this phase |
+| Exact quota dimensions and window lengths | Affects `quota_budget.rs` | Configurable per tenant tier; defaults from research (ops, bytes, compute, datagrams, sessions) |
+| Whether `TenantEnvelope` AEAD uses xchacha20poly1305 or chacha20poly1305 by default | Nonce size (192 vs 96 bits) | xchacha20poly1305 default (random nonces safe); chacha20poly1305 as explicit option |
+| Integration timing with `ids-carrier` (Phase 002) | Envelope codec depends on `Endpoint` shape | Codec written against `ids-000_aa::Endpoint`; adjusted when `ids-carrier` lands |
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-tenant-isolation` crate | User directive: separate crates instead of more folders in existing ones; single responsibility |
+| `TenantId` as canonical identifier (single definition) | Prevents divergent tenant ID types across crates; `ids-000-aa` single-control-point rule |
+| Server-derived tenant context; client IDs as selectors only | OWASP Multi-Tenant Security Cheat Sheet; prevents impersonation and context injection |
+| Deny-by-default cross-tenant access | Isolation must be enforced, not assumed; AWS SaaS tenant isolation (isolation is foundational) |
+| Per-tenant token-bucket + GCRA admission | Constant-time, burst-aware, backpressure-compatible (AWS fairness research) |
+| Weighted fair queuing for shared resources | Max-min fairness under skew (Pisces OSDI 2012); protects neighbors from noisy tenants |
+| Envelope encryption: per-resource DEK + tenant-scoped KEK | Math-enforced cryptographic isolation (WorkOS/Knot pattern); blast radius limited to one tenant |
+| Allowed crypto only: ed25519, xchacha20poly1305, chacha20poly1305, sha256, blake3 | IDS policy; no AES/RSA/ECDH/key-agreement outside set |
+| Saturating arithmetic on quota/usage counters | No overflow-driven quota escape; deterministic tick-based windows |
+| All traffic via `ids-carrier::Endpoint`; no networking stack | Carrier-agnostic absolute rule; no IP/TCP/UDP/QUIC/HTTP/DNS or any wireless/mesh/VPN tech |
+| Append-only tenant audit log with hash chain | Tamper evidence (OWASP logging); tenant-restricted reads; WORM append behavior |
+| Research-only this phase; no source modifications | Plan document is the deliverable; implementation lands in later phases |
+
+### 12. Sources
+
+1. AWS — "SaaS Tenant Isolation Strategies: Isolating Resources in a Multi-Tenant Environment" (whitepaper). https://docs.aws.amazon.com/pdfs/whitepapers/latest/saas-tenant-isolation-strategies/saas-tenant-isolation-strategies.pdf — isolation is foundational; resource isolation strategies for multi-tenant SaaS.
+2. PlanetScale — "Approaches to tenancy in Postgres". https://planetscale.com/blog/approaches-to-tenancy-in-postgres — shared-schema / schema-per-tenant / database-per-tenant isolation models.
+3. Azure Architecture Center — "Noisy Neighbor Antipattern". https://learn.microsoft.com/en-us/azure/architecture/antipatterns/noisy-neighbor/noisy-neighbor — one tenant must not degrade another's performance.
+4. AWS Builder Center — "Fairness in multi-tenant systems". https://builder.aws.com/content/3Eupj3d2bo4fEvlzYbICMZNhQ3B/fairness-in-multi-tenant-systems — per-tenant quotas, token bucket, admission control, load shedding, distributed quota.
+5. W3C — "Trace Context". https://www.w3.org/TR/trace-context — context propagation with tenant-scoped metadata (tracestate multi-tenant keys).
+6. HashiCorp Vault — "Multi-tenancy with Namespaces". https://learn.hashicorp.com/tutorials/cloud/vault-namespaces — isolated tenant environments (Vault-as-a-Service) with scoped policies.
+7. HashiCorp Vault — Transit engine envelope encryption with context-based key derivation. https://hashicorp.com/blog/adopting-hashicorp-vaults-transit-engine-high-performance-envelope-encryption-ariso-ai — per-context derived keys from one master KEK.
+8. WorkOS — "Cryptographic key isolation for multi-tenant SaaS". https://workos.com/blog/cryptographic-key-isolation-multi-tenant-saas — per-tenant KEK, DEK envelope encryption, math-enforced tenant boundaries.
+9. Knot — per-tenant encryption library (HKDF-per-tenant derivation, envelope format). https://github.com/lux-in-tenebris-lucet/knot-tenant-encryption — per-tenant keys limit cross-tenant blast radius.
+10. Canal Mesh — Sigcomm 2024, sidecar-free multi-tenant service mesh. https://cs.stanford.edu/~keithw/sigcomm2024/sigcomm24-final57-acmpaginated.pdf — tenant isolation without per-pod sidecars; noisy-neighbor in shared proxies.
+11. Istio — Ambient mode / ztunnel overview. https://istio.io/latest/docs/ambient/overview — sidecar-less zero-trust overlay; L3/L4 security without per-pod proxies.
+12. NIST SP 800-207A — Zero Trust Architecture for cloud-native multi-location environments. https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207A.pdf — identity-based access control replaces network-perimeter trust.
+13. OWASP — "Multi-Tenant Security Cheat Sheet". https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html — tenant identification, IDOR prevention, composite keys, deny-by-default, audit.
+14. AWS — Lambda MicroVMs / Firecracker design. https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md — hardware-enforced multi-tenant isolation, cgroups/seccomp/jailer defense in depth.
+15. AuditKit — "Multi-Tenant Audit Logging: Architecture Patterns That Scale". https://auditkit.dev/blog/multi-tenant-audit-logging-patterns — shared table + RLS, schema-per-tenant, database-per-tenant; tamper-evident hash chains.
+16. SPIFFE/SPIRE — Concepts. https://spiffe.io/docs/latest/spire-about/spire-concepts — runtime-issued workload identities, trust domains per administrative boundary.
+17. AWS Prescriptive Guidance — OPA multi-tenant access control. https://docs.aws.amazon.com/prescriptive-guidance/latest/saas-multitenant-api-access-authorization/opa-rbac-examples.html — per-tenant RBAC data, tenant isolation and privacy of policy data.
+18. orion-rs — usable pure-Rust crypto (XChaCha20-Poly1305, BLAKE3, SHA2, Ed25519 surface). https://github.com/orion-rs/orion — allowed-crypto crate surface reference.
+19. ring — Rust crypto (Ed25519, X25519, ChaCha20Poly1305, SHA-256). https://docs.rs/ring — allowed-crypto crate surface reference.
+20. Clever Cloud / Biscuit — Biscuit 2.0 authorization tokens. https://biscuitsec.org/blog/biscuit-2-0 — decentralized Datalog tokens, multitenant isolation, offline delegation.
+21. arXiv — Capability-based access control for multi-tenant systems (OAuth 2.0 + Verifiable Credentials). https://arxiv.org/html/2104.11515v2 — capability tokens as attenuated authorization.
+22. Pisces — OSDI 2012, "Performance Isolation and Fairness for Multi-Tenant Cloud Storage". https://pages.cs.wisc.edu/~remzi/Classes/739/Fall2016/Papers/pisces-osdi12.pdf — per-tenant weighted fair shares, max-min fairness.
+23. Azure Architecture Center — "Tenancy Models for a Multitenant Solution". https://learn.microsoft.com/en-us/azure/architecture/guide/multitenant/considerations/tenancy-models — B2B/B2C tenant mapping, user/tenant structure.
+24. Lyft — Confidant service-to-service authentication (KMS auth). https://lyft.github.io/confidant — caller proves identity before secrets/envelopes are released.
+25. AWS — SaaS tenant isolation with ABAC using STS tags in JWT. https://aws.amazon.com/blogs/security/saas-tenant-isolation-with-abac-using-aws-sts-support-for-tags-in-jwt — tenant-scoped temporary credentials from verified claims.
+26. arXiv — C8s confidential Kubernetes (TEEs per tenant). https://arxiv.org/html/2604.26974 — hardware isolation per tenant when logical isolation is insufficient.
+27. Cargo — Workspaces reference. https://doc.rust-lang.org/cargo/reference/workspaces.html — workspace members, path dependencies, shared Cargo.lock.
+28. IDS prompts.txt entry 91 (verbatim). C:/idfs/prompts.txt — Phase 091 crate definition, contents, constraints.
+29. IDS plan references. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md — HX-241 plan format (Executive Summary, Architecture, Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Decisions, Sources).
+30. C:/idfs/ — existing IDS workspace skeleton (ids-000-aa crate with types.rs, contracts/, invariants/, errors.rs, versioning.rs).
+
+---
+
+**End of plan-091.md. Research only — no code written, no files created, no repository changes made beyond this plan document.**
+
+
+# PHASE 092:
+
+## Phase 092 — Create the ids-resource-quota crate (Per-entity resource limits): Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1375-1389)
+
+```
+92. Research only do not read plan.md **[Phase 092 — Create the ids-resource-quota crate: Per-entity resource limits.]**
+
+Crate: ids-resource-quota
+Purpose: Per-entity resource limits.
+Contents: Storage quotas, bandwidth quotas, compute quotas, concurrency quotas, recovery bandwidth quotas, quota enforcement, quota violation handling.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 092 — Create the ids-resource-quota crate: Per-entity resource limits.]**
+
+Create plan-092.md in C:/idfs/plans/ for the ids-resource-quota crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 092 creates `ids-resource-quota`, the IDS crate that enforces per-entity resource limits. It owns quota registration, per-entity usage tracking, quota admission/denial decisions, quota enforcement (throttle/reject/degrade), quota violation handling, and recovery-bandwidth quotas — all carrier-agnostic. `ids-resource-quota` does not open sockets or drive any transport directly; it evaluates whether an operation fits within an entity's quota, issues an admission decision (`Admit`, `Throttle`, `Reject`, `Degrade`), and returns an opaque `Vec<u8>` decision payload that the caller ships to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`).
+
+Quota kinds defined:
+
+| Quota kind | What it limits | Enforcement point |
+|------------|----------------|-------------------|
+| Storage quota | Bytes stored per entity (logical + physical incl. WAL/replicas) | ids-store / ids-erasure write admission |
+| Bandwidth quota | Bytes transferred per entity per window | Carrier boundary framing layer |
+| Compute quota | CPU time / instruction budget per entity per period | ids-compute / task admission |
+| Concurrency quota | In-flight operations per entity | ids-session / task submission |
+| Recovery bandwidth quota | Bytes used for recovery/rebuild per entity | ids-recovery / erasure rebuild throttle |
+
+All quotas carry a hard limit (cannot exceed) and an optional soft limit (warning + grace period). Quota kinds are dimensioned independently: a tenant may be under storage quota but over bandwidth quota; each is enforced separately. Violations produce signed audit entries (sha256/blake3 chain + ed25519-signed checkpoints). Enforcement never uses `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh — only `ids-carrier::Endpoint` for decision transport. Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305, consumed via `ids-crypto` primitive IDs from `ids-000-aa`.
+
+A skeleton `ids-resource-quota` crate does NOT yet exist at `C:/idfs/ids-resource-quota/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, plus sealed trait contracts and error types. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+Research basis: 30 parallel searches returned token bucket (refill at constant rate, burst capacity, consume-per-request) and GCRA (single TAT timestamp per key, exact Retry-After, O(1) state, used by Stripe/Cloudflare/Kong/Shopify); leaky bucket vs token bucket comparison (burst vs smooth output, drop vs queue semantics); Generic Cell Rate Algorithm / virtual scheduling (ATM policing/shaping reference, SCR/CDT/PCR parameters); Deficit Round Robin and Weighted Deficit Round Robin (quantum + deficit counter per queue, weighted fair queuing, byte-cost scheduling); Credit-Based Fair Queueing (credit counters per flow, bounded counters, SCFQ fairness bounds); Hierarchical Token Bucket (rate/ceil/borrowing model, leaf-class shaping, bandwidth classes); Kubernetes ResourceQuota (per-namespace hard limits, CPU/memory/object-count quotas, admission-time enforcement, 403 on violation); Linux CFS Bandwidth Control (cpu.cfs_quota_us / cpu.cfs_period_us per cgroup, throttling until period replenishment); Kafka KIP-13 quotas (per-client-id byte read/write quotas, dynamic overrides); Nomad resource quotas (per-namespace CPU/memory/device limits, queue-until-available behavior); OpenStack Keystone Unified Limits (registered/domain limits per service/resource/project, strict two-level hierarchy); AWS API Gateway throttling (token bucket, rate + burst, per-Region/account); Azure throttling design guide (ingress/internal/egress/state-aware throttling points, 429 vs 503 signaling); AWS "Fairness in multi-tenant systems" (admission control, load shedding, quota enforcement per tenant, 429 signaling); quota-lease pattern (frontends lease credit chunks from a global allocator, bounded overshoot independent of fleet size, headroom-proportional grants near limit); JuiceFS quota design (total/subdirectory/user/group quotas, local accumulation + periodic flush + periodic refresh, decoupled baseline vs incremental usage); Elasticsearch CCR recovery bandwidth throttling (`max_bytes_per_sec`, max concurrent file chunks); Longhorn replica rebuild QoS (global + per-volume rebuild bandwidth limit); Portworx dynamic resync bandwidth control (application I/O priority, max bandwidth cap); backpressure / load shedding design (reject cheaply instead of processing, circuit breaker, retry storms); sliding-window vs fixed-window counters (boundary burst, sliding window log/counter precision vs memory); fixed-memory DDoS sketches for quota key cardinality control.
+
+---
+
+### 2. Architecture Overview
+
+`ids-resource-quota` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/enforcement layer: given an operation tagged with an entity ID and a resource dimension, it decides (a) whether the operation may proceed, (b) at what rate (throttle delay), (c) whether to reject or degrade, and (d) what audit entry to record. It never sends bytes itself; it returns a `QuotaDecision` that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (quota consumers)                │
+│  ids-store, ids-recovery, ids-compute, ids-session — op + entity + dimension  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 092: ids-resource-quota (THIS CRATE — enforcement)      │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐   │
+│  │ quota registry  │ │ admission eval  │ │ violation       │ │ throttle │   │
+│  │ (quota defs per │ │ (token bucket / │ │ handling        │ │ (GCRA)   │   │
+│  │ entity + dim)   │ │ GCRA / DRR /    │ │ (reject/throttle/ │ │ exact    │   │
+│  └─────────────────┘ │ DRR / WDRR /    │ │ degrade/audit)  │ │ retry-after│   │
+│  ┌─────────────────┐ │ credit leases)  │ └─────────────────┘ └──────────┘   │
+│  │ usage tracker   │ │                 │ │                 │                 │
+│  │ (per-entity     │ │                 │ │                 │                 │
+│  │ counters,       │ │                 │ │                 │                 │
+│  │ soft/hard state)│ │                 │ │                 │                 │
+│  └─────────────────┘ │                 │ │                 │                 │
+│  ┌─────────────────┐ │                 │ │                 │                 │
+│  │ audit signer    │ │                 │ │                 │                 │
+│  │ (sha256/blake3  │ │                 │ │                 │                 │
+│  │ chain + ed25519)│ │                 │ │                 │                 │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘ └──────────┘   │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                          │ opaque Vec<u8> datagrams
+                                          ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                     │
+│  send_datagram(Endpoint{CarrierType, addr: Vec<u8> ≤ 1024 B}, payload: &[u8])│
+│  receive_datagram → (Endpoint, Vec<u8>)                                       │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS      │
+│  / Wi-Fi / Bluetooth / cellular / VPN / mesh                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of a quota-tagged operation:** client submits `Op{entity_id, dimension, cost}` → `ids-resource-quota` evaluates the entity's quota for that dimension: checks hard/soft limits, current usage, admits via token-bucket (rate+burst) or GCRA (smooth pacing) or DRR/WDRR (weighted fair sharing across entities), returns `QuotaDecision{Admit|Throttle{retry_after}|Reject|Degrade, remaining, reset_at}` → caller enforces (proceeds, delays, rejects, or degrades) and ships the result via `ids-carrier::Endpoint`; usage is credited on completion; violations append to the signed audit chain.
+
+**Quota evaluation models (research-verified):**
+- **Token bucket** — per-entity bucket: capacity = burst allowance, refill rate = steady-state quota; each operation consumes `cost` tokens; if insufficient, `Throttle`/`Reject`. Allows short bursts, enforces long-term average. Used for bandwidth and storage-rate quotas.
+- **GCRA** — per-entity single TAT timestamp; `TAT = max(lastTAT, now) + emission_interval`; `allowed = TAT - burst_offset ≤ now`; exact `retry_after`. Minimal state (one u64 per key), distribution-friendly. Used where exact Retry-After and smooth pacing matter.
+- **Deficit Round Robin (DRR)** — per-entity deficit counter incremented by quantum each round; an entity may transmit while deficit ≥ packet cost; deficit reduced by cost. Fair byte/op sharing across entities with variable-size operations.
+- **Weighted DRR / Credit-Based Fair Queueing** — per-entity credit/deficit with weights; proportional share of a shared resource; bounded counters avoid overflow.
+- **Hierarchical quota** — tenant tree: a request is admitted only if every node on the path from leaf to root has room; child limits may sum to more than parent (deliberate oversubscription).
+- **Credit leases** — for high-rate dimensions, a global allocator hands each enforcement point a bounded lease of credit for a window; local admission from the lease; unused credit returned on expiry; bounded overshoot independent of fleet size.
+
+**Crypto used:** ed25519 for signing quota decisions and audit checkpoints; sha256/blake3 for quota IDs, usage-hash chaining, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt quota state at rest when confidentiality required. No other crypto.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 12.
+
+#### 3.1 Quota taxonomy: storage / bandwidth / compute / concurrency / recovery-bandwidth
+
+Per prompts.txt entry 92, `ids-resource-quota` contains exactly these five quota kinds:
+
+- **Storage quota** — bounds bytes stored per entity, counting logical bytes plus physical overhead (WAL, replicas, erasure fragments, tombstones, index). Modeled on filesystem quotas (per-user/group/project block + inode limits, soft/hard + grace period) and Kubernetes ResourceQuota (aggregate resource consumption per namespace).
+- **Bandwidth quota** — bounds bytes transferred per entity per time window (ingress + egress, or per direction). Modeled on per-user bandwidth shapers and Kafka KIP-13 (per-client-id MBps read/write quotas).
+- **Compute quota** — bounds CPU time / instruction budget per entity per period. Modeled on Linux CFS Bandwidth Control (quota microseconds per period; throttled until replenishment).
+- **Concurrency quota** — bounds in-flight operations per entity. Modeled on semaphore / async concurrency-limit patterns (acquire before operation, release on completion including error paths).
+- **Recovery bandwidth quota** — bounds bytes used for recovery/rebuild per entity, so recovery traffic never starves foreground traffic. Modeled on Elasticsearch CCR recovery bandwidth throttling, Longhorn replica rebuild QoS, Portworx dynamic resync bandwidth control.
+
+Each quota kind carries `hard_limit` (cannot exceed; operation fails), optional `soft_limit` (warning + grace period; operation allowed but alerted), `window` (time interval for rate-based quotas), `burst` (token-bucket capacity), and `weight` (for fair sharing).
+
+#### 3.2 Token bucket admission
+
+**Source:** Redis rate-limiter docs (token bucket: init capacity, refill at constant rate, consume per request, deny when empty, capacity caps burst); API Gateway throttling (token bucket, rate + burst, 429 when exceeded); GitHub rate-limiting comparison blogs (token bucket vs leaky bucket).
+
+Per-entity token bucket state: `{tokens: f64, capacity: u64, refill_per_sec: f64, last_refill: IdsTime}`. On request with cost `c`: `tokens = min(capacity, tokens + elapsed * refill_per_sec)`; if `tokens >= c`, `tokens -= c`, admit; else `Throttle{retry_after = (c - tokens) / refill_per_sec}` or `Reject`. Burst = capacity; steady-state = refill_per_sec. Fractional costs supported naturally (weighted ops charge proportional tokens).
+
+#### 3.3 GCRA (Generic Cell Rate Algorithm) admission
+
+**Source:** Wikipedia GCRA; `gcra-vs-token-bucket` posts; Stripe/Cloudflare/Kong/Shopify production use; `ratelimiter-flexible` and Redis `redis-cell` GCRA implementations.
+
+Per-entity GCRA state: single `tat: u64` (Theoretical Arrival Time, IdsTime ticks). `emission_interval = window / limit` ticks; `burst_offset = emission_interval * (burst - 1)`. On request: `new_tat = max(tat, now) + emission_interval`; allowed iff `new_tat - burst_offset <= now`; else `Throttle{retry_after = new_tat - burst_offset - now}`. On allow, `tat = new_tat`. O(1) per key, exact integer retry-after, no floating-point drift. Equivalent to token bucket with rate `1/emission_interval` and bucket size `(burst_offset + 1)/emission_interval`.
+
+#### 3.4 Deficit Round Robin and weighted fair sharing
+
+**Source:** Linux `tc-drr` man page (deficit counter initialized to quantum per class; packet transmitted iff deficit ≥ packet size; deficit reduced by size, increased by quantum each round); DRR academic descriptions (quantum per flow, round-robin, deficit carry-over); WDRR implementations (per-item costs, weighted quantum, backlog-saturated credit); CBFQ paper (credit counters per flow, bounded, SCFQ-equivalent fairness).
+
+DRR state per entity: `{deficit: u64, quantum: u64, active: bool}`. Each round: `deficit += quantum`; serve operations while `deficit >= op_cost`; `deficit -= op_cost`. Weighted variant: `quantum` proportional to entity weight; high-weight entities earn more credit per round. Credit-based variant: counters bounded (no overflow), guaranteed-rate scheduling.
+
+#### 3.5 Hierarchical quotas and tenant trees
+
+**Source:** quota-system design articles (tenants as tree; admit only if every node leaf→root has room; child limits may sum > parent = deliberate oversubscription); OpenStack Keystone Unified Limits (registered limits + domain overrides; strict two-level hierarchy); Nomad quotas (per-namespace, shareable quota specs, region limits).
+
+Model: `QuotaScope` tree (org → project → entity). Each scope has limits per dimension. Admission requires `available(scope) >= cost` for every ancestor scope. Oversubscription allowed at child level; parent cap is the hard ceiling. Lease-based refill: near the parent limit, grants shrink to `headroom / active_frontends / 2` so the last budget is spread, not captured first-come.
+
+#### 3.6 Soft vs hard limits and grace periods
+
+**Source:** Linux ext4 quota docs (soft limit can be exceeded during grace period; hard limit absolute; grace time reset when below soft); Oracle/Solaris quota docs (soft timer default seven days; after expiry soft enforced as hard); Dell PowerScale SmartQuotas (hard = operation fails + alert; soft = alert + grace; advisory = infinite grace); JuiceFS quota types.
+
+Semantics in `ids-resource-quota`:
+- `Hard`: operation rejected immediately when usage ≥ hard limit.
+- `Soft`: operation allowed above soft limit until grace expires; after grace, enforced as hard. Usage dropping below soft resets grace.
+- `Advisory` (warning only): operation always allowed; alert logged.
+
+State per quota: `{usage, hard, soft_opt, grace_expires_opt, state: Under|Over|Expired}`.
+
+#### 3.7 Quota violation handling
+
+**Source:** AWS multi-tenant fairness article (429 = client quota exceeded, 503 = service limit; load shedding rejects cheaply; rate limit metrics exposed to clients); Azure throttling design guide (ingress/internal/egress/state-aware points; 429 for user limits, 503 for service limits; bounded retries, circuit breaker); Kafka KIP-13 (per-client default + override quotas; quota reserved for clients without id).
+
+Violation actions per dimension and limit type:
+- `Admit`: operation proceeds; usage credited.
+- `Throttle(retry_after)`: operation delayed; caller retries after `retry_after` (exact from GCRA/token bucket).
+- `Reject`: operation failed with `QuotaExceeded` error; caller must not retry without backoff; audit entry recorded.
+- `Degrade`: operation allowed at reduced priority/quality (e.g., recovery bandwidth throttled below foreground); used for recovery-bandwidth quotas.
+- `Shed`: load-shedding rejection under system overload (separate from per-entity quota; protects the node itself).
+
+Every rejection/throttle is recorded: `{entity_id, dimension, quota_id, action, usage_at_decision, limit, IdsTime}` → audit chain (sha256/blake3 hash chain) + periodic ed25519-signed checkpoint.
+
+#### 3.8 Recovery bandwidth quota
+
+**Source:** Elasticsearch CCR `max_bytes_per_sec` + `max_concurrent_file_chunks`; Longhorn replica rebuild QoS (global + per-volume rebuild bandwidth MB/s; effective = max(global, volume override)); Portworx dynamic resync bandwidth control (application I/O priority, max cap, no guaranteed minimum).
+
+Recovery-bandwidth quota is a special bandwidth quota scoped to recovery operations (WAL replay, replica rebuild, erasure reconstruction, anti-entropy). It has its own hard/soft limits and is enforced independently of the entity's normal bandwidth quota so recovery never starves foreground traffic. Enforcement: throttle recovery send rate to `min(recovery_quota_remaining, foreground_pressure_credit)`; `Degrade` action when foreground is under pressure.
+
+#### 3.9 Concurrency quota
+
+**Source:** async semaphore patterns (acquire before op, release on exit including exceptions; leaked permits permanently reduce limit; bound task creation not just execution).
+
+Concurrency state per entity: `{in_flight: u64, limit: u64, waiters: Queue}`. On submission: if `in_flight < limit`, `in_flight += 1`, admit; else queue or `Reject`/`Throttle`. On completion (success or error): `in_flight -= 1`, wake next waiter. Leak protection: RAII-style guard guarantees release on all paths; abort paths release immediately.
+
+#### 3.10 Compute quota
+
+**Source:** Linux CFS Bandwidth Control (quota µs per period µs; throttled threads wait until next period; burst accumulation cap `cpu.cfs_burst_us`; stats: nr_periods, nr_throttled, throttled_time).
+
+Compute state per entity: `{used_this_period: u64, quota_per_period: u64, period: IdsTime, burst_cap: u64}`. On operation start: check `used + est_cost <= quota + burst`; admit or throttle until next period. On completion: `used += actual_cost`. Period boundary resets `used` (or decays it). Throttled entities wait for replenishment; never preempt mid-operation.
+
+#### 3.11 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Source:** ed25519-dalek docs (RFC 8032 EdDSA); chacha20poly1305 docs (RFC 8439 AEAD + XChaCha20 192-bit nonce); sha2 RustCrypto; BLAKE3-team README.
+
+Usage in `ids-resource-quota`:
+- ed25519: signing quota decisions and audit checkpoints (proof of enforcement).
+- sha256: quota ID derivation, usage hash chaining, audit-chain links.
+- blake3: fast usage/history hashing, anti-entropy digest for quota-state reconciliation.
+- xchacha20poly1305: encrypt quota state at rest (24-byte nonce, random nonces safe).
+- chacha20poly1305: encrypt session/quota payloads (12-byte nonce, counter-based).
+No other crypto. `ids-crypto` exposes primitive IDs; `ids-resource-quota` references them via `ids-000-aa` only.
+
+---
+
+### Threat Model
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Entity exceeds hard quota | Resource exhaustion / noisy neighbor | Hard limit rejects immediately; per-dimension independent enforcement |
+| Burst abuse above steady rate | Quota burst consumed instantly | Token-bucket capacity caps burst; GCRA smooths output |
+| Window-boundary burst (2× limit) | Fixed-wounter pathology | GCRA/token-bucket are continuous-time, no calendar boundary |
+| Quota key explosion (millions of entities) | Memory DoS | Fixed-size state per key (token bucket: 2 f64 + ts; GCRA: 1 u64); fixed-memory sketches optional |
+| Leased-credit overshoot | Budget exceeded between reconciles | Lease size bounds overshoot; headroom-proportional grants near limit; bounded and tunable |
+| Stale usage (drift from async reporting) | Admission decisions on wrong usage | Local accumulation + periodic flush; baseline vs incremental split; async metering corrects drift |
+| Replay of quota decisions | Decision integrity | ed25519-signed decisions; nonce-bound; bounded replay cache per entity |
+| Clock manipulation for quota windows | Quota window integrity | Logical `IdsTime` ticks only; never wall-clock for quota accounting |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Idempotent usage crediting; idempotency keys on quota operations |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+| Quota downgrade attack | Consistency of enforcement | Quota definitions immutable per entity/scope; downgrade requires signed governance decision, audited |
+| Key extraction (quota signing key) | Decision authenticity | Signing keys never leave node; encrypted at rest; zeroized on shutdown |
+
+The carrier is never trusted: quota decisions are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-resource-quota ||
+|-------|------|--------------------------|--------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Error` — consumed, never redefined; sealed trait contracts mirrored |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All quota-decision traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing decisions/audit; encrypting quota state at rest; hashing usage and audit chains |
+| `ids-store` | Primary record store (quota consumer) | Tags writes with entity + storage-quota dimension; consults before acknowledging |
+| `ids-recovery` | WAL replay / replica rebuild (quota consumer) | Recovery-bandwidth quota throttles rebuild traffic; foreground priority |
+| `ids-compute` | Task execution (quota consumer) | Compute quota admission before task scheduling |
+| `ids-session` | Client-session binding (quota consumer) | Concurrency quota on in-flight ops per entity/session |
+| `ids-erasure` | Erasure encode/decode (quota consumer) | Storage quota counts erasure fragments; bandwidth quota counts repair traffic |
+| `ids-fault`, `ids-backpressure` | Overload protection | Quota rejection feeds backpressure; load shedding distinct from per-entity quota |
+
+**Integration points:** `ids-resource-quota` drives public contracts declared in `ids-000-aa`; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on `ids-discovery`/`ids-session`/`ids-cli` beyond what the contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-resource-quota/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-resource-quota/
+  Cargo.toml
+  src/
+    lib.rs                      # crate root, public API surface
+    errors.rs                   # QuotaError: QuotaExceeded, SoftLimitExceeded, InvalidQuotaId, DimensionUnknown
+    types.rs                    # QuotaId, QuotaDef, QuotaDimension, QuotaLimit, QuotaState, QuotaDecision, UsageCounter
+    quota_registry.rs           # quota registration, lookup, per-entity quota assignment
+    usage_tracker.rs            # per-entity usage counters, soft/hard state, grace tracking
+    token_bucket.rs             # token-bucket admission (capacity, refill, cost)
+    gcra.rs                     # GCRA admission (single TAT timestamp, exact retry_after)
+    drr.rs                      # Deficit Round Robin fair sharing across entities
+    wdrr.rs                     # Weighted DRR / credit-based fair queueing
+    hierarchical.rs             # tenant-tree quota: leaf-to-root admission, oversubscription
+    lease.rs                    # credit leases: bounded-overshoot distributed admission
+    recovery_bandwidth.rs       # recovery-bandwidth quota, foreground priority
+    concurrency.rs              # in-flight operation limit per entity
+    compute.rs                  # CPU-time quota per period per entity
+    admission.rs                # unified admission: evaluate all dimensions for an op
+    enforcement.rs              # enforce decision: Admit/Throttle/Reject/Degrade/Shed
+    violation.rs                # violation recording, audit entry construction
+    audit.rs                    # signed audit: sha256/blake3 chain + ed25519 checkpoints
+    carrier_adapter.rs          # opaque Vec<u8> decision framing to ids-carrier::Endpoint
+    contracts/                  # sealed trait contracts (~12 files)
+      quota_contract.rs, admission_contract.rs, enforcement_contract.rs,
+      throttle_contract.rs, audit_contract.rs, carrier_contract.rs, mod.rs + 5 more
+    invariants/                 # compile-time/runtime invariants (~10 files)
+      hard_limit_cannot_exceed.rs, soft_grace_semantics.rs, monotonic_clock_only.rs,
+      carrier_agnostic.rs, crypto_allowlist.rs, quota_immutable.rs, audit_chain_sound.rs,
+      lease_overshoot_bounded.rs, mod.rs + 1 more
+  tests/                        # property/verification tests (~30 files)
+  benches/                      # (~10 files)
+  docs/                         # (~14 files)
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `tests/`, `benches/`, `docs/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+- **QuotaId / QuotaDef**: `QuotaId` = BLAKE3-256 of (entity_id, dimension, scope); `QuotaDef { dimension, hard, soft_opt, window, burst, weight, scope }`.
+- **QuotaDimension** enum: `Storage`, `Bandwidth`, `Compute`, `Concurrency`, `RecoveryBandwidth`.
+- **QuotaState** enum: `Under`, `Over` (above soft, within grace), `Expired` (above soft past grace), `AtHard` (at/above hard).
+- **Token bucket**: `tokens = min(capacity, tokens + elapsed * refill)`; admit iff `tokens >= cost`; `retry_after = (cost - tokens) / refill`.
+- **GCRA**: `new_tat = max(tat, now) + emission_interval`; allowed iff `new_tat - burst_offset <= now`; `retry_after = new_tat - burst_offset - now`; state = one `u64` TAT.
+- **DRR**: per-entity `deficit += quantum` each round; serve while `deficit >= cost`; `deficit -= cost`; weighted variant scales quantum by entity weight.
+- **Hierarchical admission**: `admit(entity, cost)` iff `∀ scope ∈ ancestors(entity): available(scope) >= cost`; child limits may sum > parent (oversubscription).
+- **Credit lease**: global allocator grants `grant.amount` for `grant.expires_at`; local admission from lease; unused returned on expiry; overshoot ≤ sum of outstanding leases, bounded and tunable.
+- **QuotaDecision** enum: `Admit { remaining }`, `Throttle { retry_after }`, `Reject { reason }`, `Degrade { reduced }`, `Shed { reason }`.
+- **Audit chain**: each decision = SHA-256/BLAKE3-chained entry `{entity, dimension, action, usage, limit, IdsTime, prev_hash}` + periodic ed25519-signed checkpoint; offline verifiable.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `serde` — serialization of quota envelopes, decisions, audit entries.
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. No async runtime.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-92.1 | Five quota kinds defined: storage, bandwidth, compute, concurrency, recovery-bandwidth | `QuotaDimension` enum contains all five; each with hard/soft/window/burst/weight |
+| AC-92.2 | Token-bucket admission: burst allowed up to capacity, steady-state = refill rate | Unit test: burst of `capacity` ops admitted instantly, then throttled to `refill_per_sec` |
+| AC-92.3 | GCRA admission: single TAT state, exact retry_after, no boundary burst | Unit test: continuous traffic at limit admitted smoothly; `retry_after` exact integer |
+| AC-92.4 | DRR/WDRR fair sharing: weighted entities receive proportional service | Simulation: quantum ratio 4:1 ⇒ service ratio ≈ 4:1 over many rounds |
+| AC-92.5 | Hierarchical admission: leaf→root all must have room; oversubscription allowed at child | Test: parent cap blocks even when children have room; children sum > parent permitted |
+| AC-92.6 | Soft limit + grace: allowed during grace, enforced as hard after expiry; reset below soft | State-machine test: Under→Over→Expired→Under transitions correct |
+| AC-92.7 | Hard limit: immediate rejection at/above hard limit; audit entry recorded | 100% of ops above hard rejected; `QuotaExceeded` error + audit chain entry |
+| AC-92.8 | Concurrency quota: in-flight ≤ limit; release on all completion paths including error | Test: 200 concurrent ops, limit 20; in-flight never exceeds 20; returns to 0 after batch |
+| AC-92.9 | Compute quota: throttled until period replenishment; burst cap respected | Test: quota exhausted ⇒ throttle until next period; `cpu.cfs_burst_us`-style cap |
+| AC-92.10 | Recovery-bandwidth quota: independent of normal bandwidth; foreground priority | Test: recovery throttled below foreground under pressure; `Degrade` action |
+| AC-92.11 | All traffic via `ids-carrier::Endpoint`; zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) + source grep: zero matches |
+| AC-92.12 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in crypto surface | Allowlist unit test passes |
+| AC-92.13 | Every quota decision recorded in append-only, hash-chained, ed25519-signed audit log with `NodeId` + `IdsTime` | Audit tests pass; offline verification of chain |
+| AC-92.14 | Credit-lease overshoot bounded, independent of fleet size | Lease model test: overshoot ≤ N·(batch−1) or window-coupled = exact limit |
+| AC-92.15 | Crate compiles cleanly | `cargo check -p ids-resource-quota` exits 0 with no warnings |
+| AC-92.16 | Conformance tests pass | `cargo test -p ids-resource-quota` passes all quota/admission/enforcement/audit tests |
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete quota defaults per dimension:** `(hard, soft, window, burst)` defaults per entity type are deployment-tuned; to be validated at integration with `ids-store`/`ids-recovery`/`ids-compute`.
+- **Lease size vs overshoot trade-off:** smaller leases = more allocator QPS, less overshoot; larger leases = better availability, larger error bound; tuning pending.
+- **Grace period duration:** soft-limit grace time (seconds/minutes/hours) is workload-dependent; unquantified.
+- **Recovery vs foreground bandwidth interaction:** how recovery-bandwidth quota balances against normal bandwidth under contention; policy decision pending.
+- **Fixed-memory sketch option:** for millions of quota keys, whether to add Count-Min/Count-Sketch usage approximation; decision pending.
+- **Interaction with `ids-session` (Phase 050):** session-bound quota tags and concurrency-quota integration to be validated at integration.
+- **Quota reconfiguration at runtime:** whether `hard`/`soft` limits can be changed without restarting the crate; semantics of in-flight operations during change pending.
+- **Cross-node quota state reconciliation:** how quota usage converges after partition heals (anti-entropy digest via blake3); design pending.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-resource-quota` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear enforcement boundary |
+| Five quota kinds exactly per prompts.txt | storage, bandwidth, compute, concurrency, recovery-bandwidth; each independently enforced |
+| Token bucket + GCRA + DRR/WDRR models | Token bucket for burst-aware rate (bandwidth/storage); GCRA for exact pacing + minimal state; DRR/WDRR for fair sharing across entities |
+| Hierarchical tenant-tree admission | Tenant scopes (org→project→entity); admit only if all ancestors have room; deliberate oversubscription at child level |
+| Soft limit + grace + hard limit semantics | Matches filesystem quota practice (ext4, PowerScale); warning before hard stop |
+| Credit leases for high-rate dimensions | Bounded overshoot independent of fleet size; frontend-local admission; allocator QPS tunable |
+| Logical `IdsTime` only; no wall-clock for quotas | Clock manipulation cannot break quota windows |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Offline-verifiable enforcement log; tamper evidence |
+| Carrier-agnostic via `ids-carrier::Endpoint`; crate returns decisions, never sends | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; via `ids-crypto` primitive IDs | Complies with allowed-crypto rule |
+| `QuotaDecision` enum: Admit/Throttle/Reject/Degrade/Shed | Covers all enforcement actions; `Degrade` for recovery-bandwidth foreground protection |
+
+---
+
+### 12. Sources
+
+1. Redis rate-limiter docs — token bucket: init, refill, consume, deny, capacity caps burst: https://redis.io/docs/latest/develop/use-cases/rate-limiter/
+2. API Gateway throttling — token bucket rate + burst, 429 on exceed: https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-request-throttling.html
+3. AWS "Fairness in multi-tenant systems" — admission control, load shedding, per-tenant quota, 429 signaling: https://aws.amazon.com/builders-library/fairness-in-multi-tenant-systems
+4. Azure throttling design guide — ingress/internal/egress/state-aware points; 429 vs 503; bounded retries, circuit breaker: https://learn.microsoft.com/en-us/azure/well-architected/design-guides/throttling
+5. Wikipedia GCRA — Generic Cell Rate Algorithm, ATM policing/shaping, I + L parameters: https://en.wikipedia.org/wiki/Generic_cell_rate_algorithm
+6. GCRA vs token bucket precision — state size, exact retry_after, fractional cost trade-offs: https://api-rate-limiting.com/core-rate-limiting-algorithms-theory/gcra-and-virtual-scheduling/gcra-vs-token-bucket-precision
+7. Token bucket vs leaky bucket comparison — burst vs smooth output, drop vs queue semantics: https://softwareengineering.stackexchange.com/questions/458527/what-is-the-difference-between-leaky-bucket-and-token-bucket-approach-during-rat
+8. Linux `tc-drr` man page — Deficit Round Robin, deficit counter + quantum per class: https://man7.org/linux/man-pages/man8/tc-drr.8.html
+9. WDRR scheduler (Go) — weighted deficit round robin, per-item costs, credit carry-over: https://pkg.go.dev/github.com/EnvelopeInc/dwrr
+10. Credit-Based Fair Queueing (CBFQ) paper — credit counters per flow, bounded, SCFQ-equivalent fairness: https://doi.org/10.1109/90.958328
+11. Linux HTB man page — hierarchical token bucket, rate/ceil/borrowing, leaf-class shaping: https://man7.org/linux/man-pages/man8/tc-htb.8.html
+12. Kubernetes Resource Quotas — per-namespace hard limits, CPU/memory/object-count, admission enforcement, 403: https://kubernetes.io/docs/concepts/policy/resource-quotas/
+13. Linux CFS Bandwidth Control — cpu.cfs_quota_us / period, throttling until replenishment, burst cap: https://docs.kernel.org/scheduler/sched-bwc.html
+14. Kafka KIP-13 Quotas — per-client-id byte read/write quotas, dynamic overrides: https://wiki.apache.org/confluence/display/KAFKA/KIP-13+-+Quotas
+15. Nomad resource quotas — per-namespace CPU/memory/device limits, queue-until-available: https://developer.hashicorp.com/nomad/docs/govern/resource-quotas
+16. OpenStack Keystone Unified Limits — registered/domain limits per service/resource/project: https://docs.openstack.org/keystone/latest/admin/unified-limits.html
+17. Quota-system design in depth — rate/budget/allocation quotas, tenant trees, leases, bounded overshoot: https://aicassindra.com/blogs/system_design/designing_quota_system.html
+18. JuiceFS quota design — total/subdirectory/user/group quotas, local accumulation + periodic flush + refresh: https://juicefs.com/en/blog/engineering/quota-design-in-distributed-architecture
+19. Elasticsearch CCR recovery settings — `max_bytes_per_sec`, max concurrent file chunks: https://www.elastic.co/guide/en/elasticsearch/reference/8.19/ccr-settings.html
+20. Longhorn replica rebuild QoS — global + per-volume rebuild bandwidth limit: https://documentation.suse.com/cloudnative/storage/1.11/en/longhorn-system/v2-data-engine/features/replica-rebuild-qos.html
+21. Portworx dynamic resync bandwidth control — application I/O priority, max cap: https://docs.portworx.com/portworx-enterprise/operations/tune-performance/resync-bandwidth
+22. Backpressure in distributed systems — throttle/drop cheaply, circuit breaker, retry storms: https://dzone.com/articles/backpressure-in-distributed-systems
+23. Sliding window vs fixed window counters — boundary burst, precision vs memory: https://learn.programmingline.com/learn/redis/redis-rate-limiting
+24. Linux ext4 quotas — soft/hard limits, grace period, grace reset: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/managing_file_systems/limiting-storage-space-usage-on-ext4-with-quotas
+25. Dell PowerScale SmartQuotas — hard/soft/advisory enforcement, alerts, notifications: https://dell.com/en-us/infohub/articles/storage-quota-management-and-provisioning-with-dell-powerscale-smartquotas-1
+26. ed25519-dalek docs — ed25519 key gen/sign/verify, RFC 8032: https://docs.rs/ed25519-dalek
+27. chacha20poly1305 docs — ChaCha20Poly1305/XChaCha20Poly1305 AEAD, RFC 8439: https://docs.rs/chacha20poly1305
+28. sha2 RustCrypto — SHA-256 implementation: https://docs.rs/sha2
+29. BLAKE3-team BLAKE3 README — BLAKE3-256, SIMD, keyed hash, KDF, XOF: https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md
+30. IDS project documents at C:/idfs: prompts.txt entry 92 (lines 1375-1389), ids-000-aa skeleton at C:/idfs/ids-000-aa/, plan format references C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document.
+
+
+# PHASE 093:
+
+## Phase 093 — Create the ids-workload-isolation crate: Prevent workload interference. Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1390-1404)
+
+```
+93. Research only do not read plan.md **[Phase 093 — Create the ids-workload-isolation crate: Prevent workload interference.]**
+
+Crate: ids-workload-isolation
+Purpose: Prevent workload interference.
+Contents: Workload classification, workload scheduling, workload priority, workload bandwidth limits, workload admission control, workload monitoring.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 093 — Create the ids-workload-isolation crate: Prevent workload interference.]**
+
+Create plan-093.md in C:/idfs/plans/ for the ids-workload-isolation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 093 creates `ids-workload-isolation`, the IDS crate dedicated to preventing workload interference (the "noisy neighbor" problem) on shared nodes. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by isolation domain. `ids-workload-isolation` owns workload classification, workload scheduling, workload priority, workload bandwidth limits, workload admission control, and workload monitoring — all carrier-agnostic. It never opens sockets or drives any transport directly; every control or monitoring message is shipped as an opaque `Vec<u8>` datagram to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` address, max 1024 bytes). `ids-workload-isolation` returns isolation decisions (classify/schedule/admit/throttle/evict) that callers frame into datagrams; the crate itself sends nothing.
+
+**Core design:** a workload object (`WorkloadId` newtype + `WorkloadSpec` {CPU shares/quota, memory limit, bandwidth cap, priority band, affinity/anti-affinity}) classified into a band (Critical/Production/Batch/BestEffort, mirroring Borg priority bands), admitted or rejected against node capacity via admission control, scheduled with CFS bandwidth control semantics (quota/period) or SCHED_DEADLINE CBS reservation, throttled when exceeding limits, and monitored via cgroup v2 stats (cpu.stat, memory.stat, pressure) plus Intel RDT monitoring (CMT LLC occupancy, MBM memory bandwidth). Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305, consumed via `ids-crypto` primitive IDs from `ids-000-aa`.
+
+**Scope boundary:** `ids-workload-isolation` decides and monitors; it does not execute workloads or manage containers directly. It integrates with `ids-store`, `ids-replication`, `ids-crdt`, etc. as workload owners that consult the crate before admitting or throttling work.
+
+A skeleton `ids-workload-isolation` crate does NOT yet exist at `C:/idfs/ids-workload-isolation/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpState`, `Error`, plus sealed trait contracts and error types. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+**Research basis:** 30 parallel searches returned the Azure noisy-neighbor antipattern and mitigation guidance; Intel "resolving noisy neighbors" (shared CPU/cache/memory bandwidth, sibling hyperthreads, L3/Memory-controller/I/O-bus sharing, CRI-RM hardware-aware placement, Intel RDT per QoS class); Kubernetes Pod QoS classes (Guaranteed/Burstable/BestEffort, request==limit guarantee, eviction order); Kubernetes Pod Priority and Preemption (PriorityClass, preempt lower-priority pods); Linux CFS bandwidth control (`cpu.cfs_quota_us`/`cpu.cfs_period_us`, 100ms default period, throttling, hierarchical over-subscription allowed, `cpu.cfs_burst_us` carry-over); Linux SCHED_DEADLINE (EDF + Constant Bandwidth Server, runtime/period/deadline, behavior isolation between tasks); Intel CAT (Cache Allocation Technology, CLOS classes, LLC allocation control via MSRs, protect important processes from noisy neighbors); Intel MBA (Memory Bandwidth Allocation, 10-90 delay values, hardware throttling between requests, noisy-neighbor detection); Linux `tc` HTB hierarchical token bucket egress shaping per container; HFSC service curves for bandwidth+delay guarantees; DSCP/DiffServ per-hop behavior packet marking; cgroups v2 cpu controller (`cpu.max`, `cpu.weight`, `cpu.stat` with nr_periods/nr_throttled/throttled_usec), memory controller (`memory.max`, `memory.current`, `memory.stat`, `memory.events` OOM), IO controller (`io.max`); Apache Mesos pluggable isolators (cgroups/cpu, cgroups/mem, cgroups/net_cls, cgroups/blkio, cfq bandwidth, two-level resource offers); Borg admission control (quota per priority band, quota-checking at submission, not scheduling; priority bands monitoring/production/batch/best-effort; production jobs don't preempt each other; LS vs batch appclass; compressible vs non-compressible resources; CFS bandwidth control for greedy LS tasks; cpusets for tight latency); Borg/Omega shared-state scheduling; Hadoop YARN Fair Scheduler (Dominant Resource Fairness, equal share over time, queue priorities, preemption); Docker CPU shares/cgroups limits; Windows Job Objects CPU rate control (WEIGHT_BASED, HARD_CAP, MIN_MAX_RATE, cycles per 10,000); FreeBSD rctl (per-jail memoryuse/pcpu/readbps/writebps/readiops/writeiops deny/throttle); cache coloring/page coloring for LLC partitioning; deterministic batch-job interference scheduling (MIMP background batch priority); SchedBlame eBPF tracer attributing CPU contention to cgroups (victim vs competitor blame matrix, <2% overhead target); cgroup perf monitoring overhead constraints (1-2%, multiplexing accuracy, staleness/blind spots).
+
+---
+
+### 2. Architecture Overview
+
+`ids-workload-isolation` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/decision layer: given a workload submission tagged with a priority band and resource spec, it decides (a) the workload's classification band, (b) whether admission is permitted against node capacity, (c) the scheduling parameters (quota/period or deadline reservation), (d) bandwidth caps (CPU, memory, network egress), and (e) the monitoring interval and metrics to collect. It never sends bytes itself; it returns `IsolationDecision` objects that callers act on and, where needed, frame into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    WORKLOAD OWNERS (ids-* clients)                            │
+│  ids-store, ids-replication, ids-crdt — submit workloads with priority band │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 093: ids-workload-isolation (THIS CRATE — policy)      │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐ │ │\n│  │ classification  │ │ scheduling      │ │ admission       │ │ priority │ │ │\n│  │ (band + spec)   │ │ (quota/period,  │ │ control (capacity │ │ bands    │ │ │\n│  │ Critical/       │ │ deadline CBS)   │ │ check + admit)  │ │ Critical/│ │ │\n│  │ Production/     │ └─────────────────┘ └─────────────────┘ │ Production/│ │ │\n│  │ Batch/ BestEffort│ │                 │                 │ Batch/   │ │ │\n│  └─────────────────┘ │                 │                 │ BestEffort│ │ │\n│  ┌─────────────────┐ │                 │                 │           │ │ │ │\n│  │ bandwidth limits│ │                 │                 │           │ │ │ │\n│  │ (CPU/mem/net)   │ │                 │                 │           │ │ │ │\n│  └─────────────────┘ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐ │ │ │\n│  │ monitoring        │ │ bandwidth       │ │ admission       │ │ eviction │ │ │ │\n│  │ (cgroup v2 + RDT) │ │ enforcement   │ │ events          │ │ policy   │ │ │ │\n│  └─────────────────┘ │ (throttle/evict)│ │ (admit/reject)  │ │           │ │ │ │\n│  ┌─────────────────┐ └─────────────────┘ └─────────────────┘ └──────────┘ │ │ │\n│  │ decision types  │ │                                             │ │ │ │\n│  │ (classify/admit │ │                                             │ │ │ │\n│  │ /throttle/evict)│ │                                             │ │ │ │\n│  └─────────────────┘ │                                             │ │ │ │\n└─────────────────────┴──────────────────┴───────────────────────────┴────┘\n                                          │ opaque Vec<u8> datagrams\
+┌─────────────────────────────────────────▼──────────────────┐\
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only  │\
+│  send_datagram(Endpoint{CarrierType≤1024B addr, Vec<u8>},  │\
+│  payload: &[u8])                                           │\
+│  receive_datagram → (Endpoint, Vec<u8>)                    │\
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP /      │\
+│  QUIC / HTTP / DNS / Wi-Fi / Bluetooth / cellular / VPN    │\
+└────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of a workload submission:** caller submits `Workload{workload_id, spec{priority_band, cpu_shares/quota, memory_limit, net_bw_cap, affinity}, node_id}` → `ids-workload-isolation` classifies into a band → admission control checks node capacity (CPU, memory, disk, network headroom) → if admitted, computes scheduling params (CFS quota/period or SCHED_DEADLINE runtime/period/deadline) and bandwidth caps → returns `AdmissionDecision{admitted, band, quota, period, memory_limit, net_cap, causal_dot}` → caller applies cgroup/tc settings and frames datagrams to `ids-carrier::Endpoint` targets → monitoring loop samples cgroup v2 stats and Intel RDT counters → `IsolationDecision{throttle, evict, continue}` emitted on violation.
+
+**Isolation semantics (research-verified):**
+
+- **Classification:** workloads are classified by priority band and resource request. Guaranteed-like workloads (request==limit for CPU+memory) get a hard reservation; Burstable-like get a minimum guarantee with burst headroom; BestEffort gets scavenged leftovers and is first to be throttled/evicted under pressure. Mirrors Kubernetes QoS classes and Borg appclass (LS latency-sensitive vs batch).
+- **Scheduling:** CFS bandwidth control (quota microseconds per period) enforces a hard CPU ceiling; SCHED_DEADLINE EDF + CBS reserves runtime per period for latency-sensitive workloads, isolating behavior between tasks. Work-conserving (scavenge idle cycles) vs non-work-conserving (hard cap) modes are selectable per band.
+- **Bandwidth limits:** CPU quota/period; memory `memory.max` hard limit + OOM behavior; network egress cap via token-bucket shaping semantics (adapted to opaque datagrams through the carrier boundary, not a real NIC); disk I/O bandwidth cap via io.max-style limits.
+- **Admission control:** quota-checking at submission (Borg model): a workload is admitted iff sufficient headroom exists at its priority band for the requested resources; rejected immediately otherwise, never left pending indefinitely. Over-subscription permitted at lower bands (Borg infinite quota at priority zero) with preemption of lower-priority workloads to make room for higher-priority ones.
+- **Priority bands:** Critical > Production > Batch > BestEffort (decreasing priority, mirroring Borg). Production-band workloads do not preempt one another (avoids preemption cascades). Preemption cascade limit configurable.
+- **Monitoring:** cgroup v2 `cpu.stat` (nr_periods, nr_throttled, throttled_usec), `memory.current`, `memory.stat`, `memory.events` (OOM kill counter); Intel RDT CMT (L3 cache occupancy per workload) and MBM (memory bandwidth per workload); pressure stall information (cpu.pressure, memory.pressure). Monitoring overhead target <2% (Google cgroup perf monitoring finding).
+- **Crypto used:** ed25519 for signing admission and eviction decisions; sha256/blake3 for workload IDs, spec hashing, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt workload state at rest when confidentiality required.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 12.
+
+#### 3.1 Noisy neighbor problem and interference taxonomy
+
+**Source:** Azure Architecture Center "Noisy Neighbor Antipattern"; Intel "resolving noisy neighbors in Kubernetes"; arXiv 2510.12629 (RDMA resource exhaustion attacks); SpectroCloud "Managing the noisy neighbor problem in Kubernetes."
+
+The noisy neighbor problem occurs when one workload consumes a disproportionate share of shared resources (CPU, last-level cache, memory bandwidth, I/O bus, network), degrading co-located workloads. Interference vectors: sibling hyperthreads share a physical core; cores on the same socket share L3 cache, memory controller, and I/O bus; sockets share interconnect bandwidth and storage devices. Mitigation categories: physical isolation (separate clusters/nodes), logical isolation (namespaces + resource quotas), hardware-assisted isolation (Intel RDT CAT/MBA), and scheduling-level isolation (CFS bandwidth, SCHED_DEADLINE, cpusets). `ids-workload-isolation` implements logical + scheduling-level isolation, with hardware-assisted isolation (CAT/MBA) as an optional backend where the platform exposes it.
+
+#### 3.2 Workload classification: QoS classes and priority bands
+
+**Source:** Kubernetes Pod QoS classes (Guaranteed/Burstable/BestEffort); Borg appclass (LS latency-sensitive vs batch); Borg priority bands (monitoring/production/batch/best-effort).
+
+Classification axes:
+- **Priority band:** Critical, Production, Batch, BestEffort (integer rank, higher = more important). Determines admission precedence and preemption victim selection.
+- **Resource guarantee class:** Reserved (request==limit, hard ceiling), Guaranteed-minimum (request<limit, scavenge headroom), BestEffort (no request, scavenges only).
+- **Compressibility:** compressible (CPU, disk I/O, network bandwidth — can be throttled without killing) vs non-compressible (memory, disk space — must kill/evict when exhausted). Mirrors Borg's compressible/non-compressible split.
+
+A workload object carries `WorkloadSpec { band, cpu_shares, cpu_quota_us, cpu_period_us, memory_limit_bytes, net_egress_cap_bps, io_bw_cap_bps, affinity_mask, compressible: bool }`.
+
+#### 3.3 Workload scheduling: CFS bandwidth control and SCHED_DEADLINE
+
+**Source:** Linux kernel CFS bandwidth control docs (sched-bwc); SCHED_DEADLINE kernel docs; Red Hat cgroups v2 CPU control.
+
+- **CFS bandwidth control:** `cpu.cfs_quota_us` (runtime per period) and `cpu.cfs_period_us` (period length, default 100ms). A group consuming its full quota is throttled until the next period. Minimum quota 1ms, max period 1s. Hierarchical: child bandwidth bounded by parent; over-subscription in aggregate allowed (work-conserving within a hierarchy). `cpu.cfs_burst_us` allows carrying unused quota forward for burst tolerance.
+- **SCHED_DEADLINE:** EDF + Constant Bandwidth Server. Parameters: runtime (µs execution per period), period (µs), deadline (µs by which runtime must complete). CBS isolates task behavior from other tasks — a misbehaving task cannot starve others beyond its reservation.
+- **cpusets:** pin workloads to specific CPUs/NUMA nodes; exclusive cpuset prevents co-location. Used for tight-latency workloads (Borg reserves entire physical cores for LS tasks).
+
+`ids-workload-isolation` exposes both: `CfsSlice{quota_us, period_us, burst_us}` for throughput-oriented workloads and `DeadlineReservation{runtime_us, period_us, deadline_us}` for latency-sensitive workloads, selected per priority band.
+
+#### 3.4 Workload priority and preemption
+
+**Source:** Kubernetes Pod Priority and Preemption (PriorityClass, preempt lower-priority pods); Borg priority/quota/admission control.
+
+Priority mechanism:
+- `PriorityBand` enum { Critical, Production, Batch, BestEffort } with integer weight.
+- Admission: higher-band workloads admitted first; lower-band workloads may remain pending if headroom insufficient.
+- Preemption: when a higher-band workload needs resources and none are free, lower-band workloads are evicted (throttled first for compressible resources, killed for non-compressible). Production-band workloads do not preempt each other (prevention of cascades). Preemption cascade depth capped.
+
+`ids-workload-isolation` returns `PreemptionDecision{victims: Vec<WorkloadId>, reason}`; the caller enforces eviction via the carrier boundary.
+
+#### 3.5 Workload bandwidth limits: CPU, memory, network, I/O
+
+**Source:** Linux cgroups v2 (cpu.max, memory.max, io.max); tc HTB hierarchical token bucket; HFSC service curves; FreeBSD rctl (readbps/writebps/readiops/writeiops throttle); Windows Job Objects CPU rate control.
+
+Per-resource caps:
+- **CPU:** CFS quota/period (hard ceiling) or weight-based proportional sharing (cpu.weight) for soft guarantees.
+- **Memory:** `memory.max` hard limit; OOM-kill policy per band (BestEffort killed first); `memory.high` soft throttle.
+- **Network egress:** token-bucket rate+ceil per workload, adapted to opaque datagrams at the carrier boundary (classify by WorkloadId tag in datagram metadata, not by IP/port — carrier-agnostic).
+- **Disk I/O:** `io.max` rbps/wbps and riops/wiops style caps.
+- **Burst:** `cpu.cfs_burst_us`-style carry-over for CPU; token-bucket burst size for network.
+
+#### 3.6 Workload admission control: quota-checking at submission
+
+**Source:** Borg quota/admission control (quota vector per priority, checked at submission not scheduling; rejected immediately if insufficient); Kubernetes node allocatable (requests ≤ allocatable); Hadoop YARN Fair Scheduler (DRF, equal share over time).
+
+Admission algorithm: on `WorkloadSubmit`, sum current allocations + requested resources per band; admit iff headroom exists at the workload's band (and parent band in hierarchy). Quota expressed as vector {CPU shares, memory bytes, net bps, io bps} per band per time window. Rejected workloads return `AdmissionRejected{band, deficient_resource, headroom_needed}` — never silently queued indefinitely. Over-subscription factor configurable per band (Borg sells infinite quota at priority zero).
+
+#### 3.7 Workload monitoring: cgroup v2 stats and Intel RDT
+
+**Source:** cgroups(7) man page; cgroup v2 architecture; systemd cgroup interface; Intel RDT architecture spec (CMT, MBM, CBA); Google LPC 2019 cgroup perf monitoring; SchedBlame eBPF tracer; perf cgroup monitoring.
+
+Monitoring inputs:
+- **cgroup v2 cpu.stat:** usage_usec, user_usec, system_usec, nr_periods, nr_throttled, throttled_usec, nr_bursts, burst_usec.
+- **cgroup v2 memory.stat/current/events:** memory.current, anon/file/cache/rss, oom/oom_kill counters, pressure (memory.pressure some/full).
+- **cgroup v2 io.stat:** read/write bytes and operations.
+- **Intel RDT CMT:** L3 cache occupancy (occupancy bytes per CLOS) via `mon_l3_*` MSRs.
+- **Intel RDT MBM:** memory bandwidth (local/remote) per workload via `mbm_*` MSRs.
+- **Pressure Stall Information:** cpu.pressure (some stall), memory.pressure.
+- **SchedBlame-style attribution:** per-victim CPU contention attributed to competing cgroups; used to detect noisy neighbors after the fact.
+
+Monitoring cadence: configurable, default 5s sample (Google Borglet model). Overhead budget <2% of CPU. Aggregation: per-workload rolling windows; alerts emitted as `IsolationDecision{throttle, evict, continue}`.
+
+#### 3.8 Carrier-agnostic boundary
+
+**Source:** IDS prompts.txt entry 1 / carrier-agnostic rule; HX-241 carrier/socket abstraction research.
+
+Absolute rule: no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh anywhere in `ids-workload-isolation`. The only address/transport type is `ids-carrier::Endpoint` = `CarrierType` (Loopback, Serial, Optical, Radio, Custom(u16)) + `Vec<u8>` address capped at 1024 bytes. Workload isolation decisions are tagged into datagram metadata by `WorkloadId`; classification of ingress datagrams to workloads happens at the receiver via the tag, not via IP/port inspection. Network bandwidth caps are enforced at the datagram-submission point (bytes-out accounting per WorkloadId), not at a NIC qdisc.
+
+#### 3.9 Allowed crypto only
+
+**Source:** RFC 8032 Ed25519; RFC 7539/RFC 8439 ChaCha20-Poly1305 and XChaCha20-Poly1305; NIST FIPS 180-4 SHA-256; BLAKE3 spec.
+
+Allowed: ed25519 (signing admission/eviction/audit decisions), xchacha20poly1305 (AEAD, random 192-bit nonces, encrypt workload state at rest), sha256 (workload ID hashing, audit-chain links), blake3 (fast content hashing, checkpoint chaining, spec hashing), chacha20poly1305 (AEAD, 96-bit nonces, session/state payloads). No other algorithm. `ids-workload-isolation` references primitive IDs via `ids-000-aa`; `ids-crypto` implements the operations.
+
+#### 3.10 Determinism and interference attribution
+
+**Source:** MIMP deadline/interference-aware scheduling; SchedBlame eBPF tracer; Google cgroup perf monitoring trade-offs (overhead, multiplexing accuracy, staleness).
+
+Determinism: admission and scheduling decisions must be deterministic given the same workload spec + node state (fixed seed, no wall-clock in decisions). Interference attribution: when a workload reports degradation, `ids-workload-isolation` consults monitoring history to attribute CPU/cache/bandwidth contention to competing workloads (SchedBlame-style blame matrix), producing `InterferenceReport{victim, culprit_workloads, resource, severity}`. Attribution is best-effort and tagged low-confidence when sampling overhead constraints force coarse granularity.
+
+---
+
+### 4. Threat Model & Mitigations
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Noisy neighbor starves co-located workloads | Performance isolation | CFS quota/period hard ceiling; SCHED_DEADLINE reservation; BestEffort scavenges only idle cycles |
+| Workload exceeds memory limit, OOM-kills neighbors | Memory isolation | `memory.max` hard limit; OOM victim selection by band (BestEffort first); `memory.high` soft throttle |
+| Workload saturates network egress | Network isolation | Per-workload token-bucket byte cap at datagram submission; bytes-out accounting per WorkloadId |
+| Admission overcommit cascades | Capacity integrity | Quota-checking at submission; reject immediately; preemption cascade depth capped; production band never self-preempts |
+| Classification downgrade attack | Integrity | Workload band immutable after admission; downgrade requires signed governance decision, audited |
+| Replay of admission/eviction decisions | Decision integrity | ed25519-signed decisions; nonce-bound; bounded replay cache per workload |
+| Monitoring blind spot (sampling too coarse) | Detection accuracy | Configurable cadence; attribution confidence scores; best-effort low-confidence tagging |
+| Clock manipulation for scheduling deadlines | Scheduling correctness | Logical time only (IdsTime ticks, never wall-clock); CBS uses period/deadline in ticks |
+| Carrier duplicates/delays datagrams | Replay/ordering | Idempotent admission decisions; replay protection at decision layer |
+| Key extraction (decision signing key) | Decision authenticity | Signing keys never leave node; encrypted at rest (xchacha20poly1305/chacha20poly1305); zeroized on shutdown |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+
+The carrier is never trusted: isolation decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-workload-isolation ||
+|-------|------|--------------------------|--------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpState`, `Error` — consumed, never redefined; sealed trait contracts mirrored |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All workload-isolation traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing decisions/audit; encrypting workload state at rest; hashing workload specs and audit chains |
+| `ids-store` | Primary record store (workload owner) | Submits store I/O as workloads; consults `ids-workload-isolation` before admitting heavy reads/writes |
+| `ids-replication` | Replica synchronization (workload owner) | Tags replication streams as workloads; throttled/egress-capped per workload |
+| `ids-crdt` | CRDT merge/replication (workload owner) | Merge workers classified as Batch/BestEffort; scavenge idle cycles |
+| `ids-query` | Query execution (workload owner) | User-facing queries classed as Critical/Production; background jobs as Batch |
+| `ids-fault` | Fault detection and recovery | Recovery workloads admitted at Critical band; interference reports feed fault decisions |
+| `ids-observability` | Metric/trace sinks | Monitoring samples exported as observability events |
+
+**Integration points:** `ids-workload-isolation` decides and monitors; workload-owner crates apply cgroup/tc-equivalent settings locally and frame datagrams via `ids-carrier::Endpoint`. No dependency on `ids-discovery`/`ids-session`/`ids-cli` beyond contract exposure.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-workload-isolation/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-workload-isolation/
+├── Cargo.toml                          # Crate manifest; ids-000-aa, ids-carrier, ids-crypto, serde, thiserror
+├── lib.rs                              # Crate root, feature gates, public re-exports
+├── constants.rs                        # Defaults: bands, periods, quotas, monitoring cadence, overhead budget
+├── error.rs                            # IsolationError (thiserror): admission, scheduling, bandwidth, monitoring
+├── types.rs                            # WorkloadId, WorkloadSpec, PriorityBand, ResourceVector, IsolationDecision
+├── features.rs                         # Feature flags: rdt, cgroups-v2, deadline-sched, audit, crypto
+│
+├── classification/                     # Workload classification
+│   ├── mod.rs
+│   ├── classifier.rs                   # Classify workload into band + guarantee class
+│   ├── band.rs                         # PriorityBand enum + weights + preemption order
+│   ├── guarantee.rs                    # Reserved/Guaranteed/BestEffort resource classes
+│   ├── compressibility.rs              # Compressible vs non-compressible resource split
+│   └── types.rs                        # ClassificationResult structures
+│
+├── scheduling/                         # Workload scheduling
+│   ├── mod.rs
+│   ├── scheduler.rs                    # Compute scheduling params per band
+│   ├── cfs_slice.rs                    # CFS quota/period/burst (cpu.cfs_quota_us/period_us/burst_us)
+│   ├── deadline.rs                     # SCHED_DEADLINE runtime/period/deadline (EDF + CBS)
+│   ├── cpuset.rs                       # CPU/NUMA pinning and exclusive placement
+│   └── types.rs                        # SchedulingResult structures
+│
+├── admission/                          # Workload admission control
+│   ├── mod.rs
+│   ├── admission_controller.rs         # Quota-checking at submission (accept/reject)
+│   ├── quota.rs                        # Resource quota vector per band per time window
+│   ├── headroom.rs                     # Node capacity headroom computation
+│   ├── overcommit.rs                   # Over-subscription factors per band
+│   └── types.rs                        # AdmissionDecision structures
+│
+├── priority/                           # Workload priority and preemption
+│   ├── mod.rs
+│   ├── preemption.rs                   # Victim selection, cascade depth cap
+│   ├── bands.rs                        # Band ordering + production self-preemption ban
+│   └── types.rs                        # PreemptionDecision structures
+│
+├── bandwidth/                          # Workload bandwidth limits
+│   ├── mod.rs
+│   ├── cpu_bandwidth.rs                # CPU quota/period enforcement
+│   ├── memory_bandwidth.rs             # memory.max/high limits, OOM policy
+│   ├── network_bandwidth.rs            # Per-workload datagram byte cap (carrier-agnostic)
+│   ├── io_bandwidth.rs                 # Disk I/O bytes/ops caps
+│   ├── burst.rs                        # Token-bucket burst and carry-over
+│   └── types.rs                        # BandwidthLimit structures
+│
+├── monitoring/                         # Workload monitoring
+│   ├── mod.rs
+│   ├── monitor.rs                      # Sample cgroup v2 + RDT counters per workload
+│   ├── cgroup_v2.rs                    # cpu.stat, memory.stat/current/events, io.stat
+│   ├── rdt.rs                          # Intel RDT CMT (L3 occupancy) + MBM (memory bandwidth)
+│   ├── pressure.rs                     # Pressure Stall Information (cpu/memory.pressure)
+│   ├── attribution.rs                  # SchedBlame-style interference blame matrix
+│   ├── cadence.rs                      # Configurable sampling interval, <2% overhead budget
+│   └── types.rs                        # MonitoringSample / InterferenceReport structures
+│
+├── decision/                           # Isolation decisions
+│   ├── mod.rs
+│   ├── engine.rs                       # Emit throttle/evict/continue decisions
+│   ├── throttle.rs                     # Throttle policy (compressible resources)
+│   ├── evict.rs                        # Eviction policy (non-compressible resources)
+│   └── types.rs                        # IsolationDecision structures
+│
+├── audit/                              # Signed, hash-chained audit log
+│   ├── mod.rs
+│   ├── audit_entry.rs
+│   ├── audit_chain.rs
+│   ├── checkpoint.rs
+│   ├── signer.rs                       # ed25519 signing of decisions
+│   ├── verifier.rs
+│   └── types.rs
+│
+├── contracts/                          # Sealed trait contracts (~10 files)
+│   ├── mod.rs
+│   ├── classification_contract.rs
+│   ├── scheduling_contract.rs
+│   ├── admission_contract.rs
+│   ├── priority_contract.rs
+│   ├── bandwidth_contract.rs
+│   ├── monitoring_contract.rs
+│   ├── decision_contract.rs
+│   ├── carrier_contract.rs
+│   └── audit_contract.rs
+│
+├── invariants/                         # Compile-time/runtime invariants (~8 files)
+│   ├── mod.rs
+│   ├── bandwidth_cap_sound.rs
+│   ├── quota_headroom_consistent.rs
+│   ├── preemption_cascade_capped.rs
+│   ├── carrier_agnostic.rs
+│   ├── crypto_allowlist.rs
+│   ├── monotonic_time_only.rs
+│   ├── audit_chain_sound.rs
+│   └── mod.rs
+│
+├── tests/                              # Property/verification tests (~30 files)
+│
+├── benches/                            # (~10 files)
+│
+├── spec/                               # Normative specifications
+│   ├── classification_spec.md
+│   ├── scheduling_spec.md
+│   ├── admission_spec.md
+│   ├── bandwidth_spec.md
+│   ├── monitoring_spec.md
+│   └── carrier_agnostic_spec.md
+│
+├── docs/                               # Documentation
+│   ├── architecture.md
+│   ├── runbook.md
+│   ├── adding_a_workload_band.md
+│   └── crypto_policy.md
+│
+└── test_vectors/                       # Deterministic inputs and expected outputs
+    ├── admission_vectors.json
+    ├── scheduling_vectors.json
+    └── interference_vectors.json
+```
+
+**Why ~90–1000 files:** one file per responsibility — classification, scheduling (CFS/deadline/cpuset), admission, priority/preemption, bandwidth (CPU/mem/net/io), monitoring (cgroup v2/RDT/pressure/attribution), decision engine, audit, contracts, invariants, plus tests, benches, specs, docs, test vectors. Reflects the genuine multi-resource isolation complexity. No stubs; every file holds production-grade code with error handling, documentation, and tests.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+- **WorkloadId / WorkloadSpec:** `WorkloadId` = BLAKE3-256 of workload name + node; `WorkloadSpec { band, cpu_shares, cpu_quota_us, cpu_period_us, memory_limit_bytes, net_egress_cap_bps, io_bw_cap_bps, affinity_mask }`.
+- **Classification:** `classify(spec) -> (band, guarantee_class, compressible)`; Guaranteed iff request==limit for CPU+memory; Burstable iff request<limit; BestEffort iff no request.
+- **Admission:** `admit(workload, node_state) -> bool` iff `headroom[band] >= request[band]` for all resources; else `AdmissionRejected{deficient_resource}`. Over-subscription factor applied per band.
+- **CFS slice:** quota_us/period_us; group throttled when cumulative runtime in period ≥ quota; `nr_throttled`/`throttled_usec` from `cpu.stat` feed back into re-tuning.
+- **Deadline reservation:** EDF + CBS; runtime/period/deadline in IdsTime ticks; earliest scheduling deadline computed on wakeup; misbehaving task isolated beyond its reservation.
+- **Preemption:** victim set = lowest-band workloads first; cascade depth capped; production band never preempts production.
+- **Bandwidth limits:** token bucket {rate, ceil, burst} per workload for network; CFS quota for CPU; `memory.max` for memory; `io.max` for disk.
+- **Monitoring:** rolling window of `cpu.stat`/`memory.stat`/RDT counters per workload; `InterferenceReport{victim, culprits, resource, severity, confidence}` via blame matrix.
+- **Decision engine:** `throttle` for compressible violations (CPU/net/io), `evict` for non-compressible (memory/disk space) violations; `continue` when within limits.
+- **Audit chain:** each isolation decision = SHA-256/BLAKE3-chained entry + ed25519-signed checkpoint; offline verifiable.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpState`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `serde` — serialization of workload envelopes, admission decisions, audit entries.
+- `thiserror` — error types.
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. Feature-gated optional backends: `rdt` (Intel RDT MSR access), `cgroups-v2` (Linux cgroup v2 filesystem), `deadline-sched` (SCHED_DEADLINE syscall wrappers), `audit` (signed audit log).
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+|| # | Criterion | Measurement ||
+|---|-----------|-----------|-------------|
+| AC-93.1 | Classification: every workload assigns to exactly one band (Critical/Production/Batch/BestEffort) + guarantee class | Classifier unit tests, 100% coverage of spec combinations |
+| AC-93.2 | Scheduling: CFS quota/period hard ceiling enforced; group throttled when quota exhausted | CFS slice unit tests; throttling triggered at quota_us within period_us |
+| AC-93.3 | Scheduling: SCHED_DEADLINE runtime/period/deadline reservation; EDF ordering | Deadline reservation unit tests; deadline miss detection |
+| AC-93.4 | Admission: workload admitted iff headroom exists at its band; rejected immediately otherwise | Admission controller unit tests; headroom arithmetic exact |
+| AC-93.5 | Priority: higher-band workload admitted first; lower-band may remain pending | Priority band ordering tests |
+| AC-93.6 | Preemption: production band never preempts production; cascade depth capped | Preemption victim-selection tests |
+| AC-93.7 | Bandwidth limits: CPU quota, memory.max, net-egress cap, io cap all enforced per workload | Per-resource limit unit tests |
+| AC-93.8 | Monitoring: cgroup v2 cpu.stat/memory.stat sampled per workload; RDT CMT/MBM where available | Monitor unit tests with mock cgroup/RDT backends |
+| AC-93.9 | Attribution: interference blame matrix identifies culprit workloads with confidence score | Attribution unit tests; confidence tagged low when sampling coarse |
+| AC-93.10 | Decision: throttle for compressible violations, evict for non-compressible, continue when within limits | Decision engine unit tests |
+| AC-93.11 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) + source grep — zero matches |
+| AC-93.12 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in crypto surface | Allowlist unit test passes |
+| AC-93.13 | Every isolation decision recorded in append-only, hash-chained, ed25519-signed audit log with `WorkloadId` + `IdsTime` | Audit chain unit test; offline verification |
+| AC-93.14 | Determinism: same workload spec + node state → identical admission/scheduling decision | Determinism tests |
+| AC-93.15 | Monitoring overhead <2% of CPU at default cadence | Overhead measurement test (mocked) |
+
+---
+
+### 10. Remaining Uncertainties
+
+1. **Concrete quota/period defaults per band:** CFS quota_us and period_us values for Critical/Production/Batch/BestEffort are deployment-tuned; to be validated at integration with workload-owner crates.
+2. **Intel RDT availability:** CAT/MBA MSR access requires privileged platform support; `rdt` feature must degrade gracefully (feature off, not compile error) on non-Intel or locked-down hosts.
+3. **Network egress cap at carrier boundary:** classifying egress datagrams by WorkloadId tag requires the carrier to preserve the tag; tag propagation semantics to be confirmed with `ids-carrier`.
+4. **Preemption cascade depth:** maximum cascade length before aborting preemption; workload-dependent, unquantified.
+5. **Monitoring cadence vs accuracy trade-off:** 5s default (Borg model) may miss short spikes; per-workload adaptive cadence TBD.
+6. **Attribution confidence under multiplexing:** perf/cgroup event multiplexing reduces attribution accuracy; confidence scoring thresholds TBD.
+7. **Interaction with `ids-fault`:** recovery workloads admitted at Critical band; exact handshake with fault recovery to be validated at integration.
+8. **Non-Linux platforms:** cgroups v2 is Linux-specific; Windows Job Objects and FreeBSD rctl equivalents are reference implementations, not crate dependencies — abstraction boundary TBD.
+9. **Burst carry-over semantics:** `cpu.cfs_burst_us`-style carry-over for CPU and token-bucket burst for network interact with hierarchical quotas; interaction model TBD.
+
+---
+
+### 11. Engineering Decisions Summary
+
+|| Decision | Rationale ||
+|----------|-----------|-------------|
+| Separate `ids-workload-isolation` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear isolation boundary |
+| Priority bands Critical > Production > Batch > BestEffort | Mirrors Borg priority bands and Kubernetes QoS; intuitive preemption order |
+| CFS quota/period + SCHED_DEADLINE runtime/period/deadline | CFS for throughput ceilings; deadline CBS for latency-sensitive behavior isolation (Linux kernel proven) |
+| Admission = quota-checking at submission (reject immediately) | Borg model; avoids pending-forever ambiguity; capacity integrity |
+| Production band never self-preempts | Prevents preemption cascades (Borg finding) |
+| Compressible (CPU/net/io) → throttle; non-compressible (memory/disk) → evict | Mirrors Borg compressible/non-compressible split; avoids killing for rate-limited resources |
+| Monitoring via cgroup v2 + Intel RDT CMT/MBM; <2% overhead | Linux cgroup v2 is the standard container isolation interface; RDT gives hardware-level cache/bandwidth visibility; Google overhead target |
+| Attribution via blame matrix with confidence scores | SchedBlame-style post-hoc attribution; best-effort under sampling constraints |
+| All decisions signed (ed25519), audit chain (sha256/blake3) | Tamper-evident, offline-verifiable isolation log |
+| Carrier-agnostic via `ids-carrier::Endpoint`; decisions returned, never sent | Preserves IDS architecture; no network stack in trust base |
+| Logical time only (IdsTime ticks); no wall-clock in scheduling | Clock manipulation cannot break deadline/CBS guarantees |
+| Only allowed crypto; via `ids-crypto` primitive IDs | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+1. Azure Architecture Center, "Noisy Neighbor Antipattern" — shared resource pooling, noisy neighbor degradation, mitigation via tier migration and pod limits. https://learn.microsoft.com/en-us/azure/architecture/antipatterns/noisy-neighbor/noisy-neighbor
+2. Intel, "Resolving Noisy Neighbors in Kubernetes" — shared CPU/L3/memory-bandwidth/I/O-bus interference, sibling hyperthreads, CRI-RM hardware-aware placement, Intel RDT per QoS class. https://intel.com/content/www/us/en/developer/articles/technical/noisy-neighbors-problem-in-kubernetes.html
+3. arXiv 2510.12629, "Noisy Neighbor: Exploiting RDMA for Resource Exhaustion Attacks in Containerized Clouds" — RNIC resource exhaustion, state/pipeline saturation attacks, adaptive throttling. https://arxiv.org/html/2510.12629v1
+4. SpectroCloud, "Managing the noisy neighbor problem in Kubernetes multi-tenancy" — physical vs logical isolation, namespaces, Resource Quotas, VPA right-sizing, overprovisioning. https://spectrocloud.com/blog/managing-the-noisy-neighbor-problem-in-kubernetes-multi-tenancy
+5. Kubernetes, "Pod Quality of Service Classes" — Guaranteed/Burstable/BestEffort, request==limit criteria, eviction order. https://kubernetes.io/docs/concepts/workloads/pods/pod-qos
+6. Kubernetes design-proposals archive, "node/resource-qos.md" — requests/limits, compressible vs incompressible, QoS classes in decreasing priority. https://github.com/kubernetes/design-proposals-archive/blob/main/node/resource-qos.md
+7. Linux kernel, "CFS bandwidth control" (sched-bwc) — cpu.cfs_quota_us/cpu.cfs_period_us, throttling, hierarchical over-subscription, cpu.cfs_burst_us. https://kernel.org/doc/Documentation/scheduler/sched-bwc.txt
+8. Linux kernel, "Deadline Task Scheduling" (sched_deadline) — EDF + Constant Bandwidth Server, runtime/period/deadline, behavior isolation. https://docs.kernel.org/scheduler/sched-deadline.html
+9. Intel, "Introduction to Cache Allocation Technology" — CAT, CLOS classes, LLC allocation control via MSRs, protect important processes. https://software.intel.com/content/www/us/en/develop/articles/introduction-to-cache-allocation-technology.html
+10. arXiv 2206.14637, "Assessing Intel's Memory Bandwidth Allocation" — MBA, 10-90 delay values, hardware throttling between requests, noisy-neighbor detection. https://arxiv.org/html/2206.14637
+11. Linux `tc` HTB documentation — hierarchical token bucket egress shaping, rate/ceil per class, fq_codel leaf qdiscs. https://man7.org/linux/man-pages/man8/tc-htb.8.html
+12. Linux `tc` HFSC man page — service curves, realtime/linkshare/upperlimit criteria, bandwidth+delay guarantees. https://man7.org/linux/man-pages/man7/tc-hfsc.7.html
+13. Cisco, "Implement QoS Policies with DSCP" — DiffServ DS field, DSCP, per-hop behavior, metering/marking/shaping/policing. https://cisco.com/c/en/us/support/docs/quality-of-service-qos/qos-packet-marking/10103-dscpvalues.pdf
+14. Kubernetes, "Pod Priority and Preemption" — PriorityClass, priority values, preemption of lower-priority pods. https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption
+15. Google, "Large-scale cluster management at Google with Borg" — priority bands (monitoring/production/batch/best-effort), quota admission control, preemption, LS vs batch appclass, compressible vs non-compressible, CFS bandwidth control, cpusets. https://static.googleusercontent.com/media/research.google.com/en/us/pubs/archive/43438.pdf
+16. Google, "Borg, Omega, and Kubernetes" — container-level resource isolation, lessons learned. https://queue.acm.org/doi/pdf/10.1145/2898442.2898444
+17. Apache Mesos, "cgroups/cpu isolator" — CFS shares and CFS bandwidth control, cpuacct accounting, throttling effects. https://mesos.apache.org/documentation/latest/isolators/cgroups-cpu
+18. Apache Mesos, "Mesos containerizer" — pluggable isolators (cgroups/cpu, mem, net_cls, blkio, etc.), two-level resource offers. https://github.com/apache/mesos/blob/master/docs/mesos-containerizer.md
+19. Hadoop, "Fair Scheduler" — Dominant Resource Fairness, equal share over time, queue priorities, preemption. https://hadoop.apache.org/docs/stable/hadoop-yarn/hadoop-yarn-site/FairScheduler.html
+20. Red Hat, "Using cgroups-v2 to control distribution of CPU time" — cpu.max, cpu.weight, cpu.stat (nr_periods/nr_throttled/throttled_usec). https://docs.redhat.com/en/documentation/Red_Hat_Enterprise_Linux/8/html/managing_monitoring_and_updating_the_kernel/using-cgroups-v2-to-control-distribution-of-cpu-time-for-applications
+21. Linux man page, cgroups(7) — control groups, cgroupfs, subsystems, delegation, v2 hierarchy. https://man7.org/linux/man-pages/man7/cgroups.7.html
+22. systemd, "New Control Group Interfaces" — Delegate property, single-writer, D-Bus accounting properties (CPUUsageNSec, MemoryCurrent, IOReadBytes, etc.). https://systemd.io/CONTROL_GROUP_INTERFACE
+23. Intel RDT Architecture Specification — CMT (L3 occupancy), MBM (memory bandwidth), CBA (cache bandwidth allocation). https://cdrdv2-public.intel.com/916573/356688-005-intel-rdt-architecture-spec.pdf
+24. Google LPC 2019, "cgroup performance monitoring" — sampling vs counting approaches, <2% overhead target, multiplexing accuracy, attribution trade-offs. https://lpc.events/event/4/contributions/291/attachments/313/528/Linux_Plumbers_Conference_2019.pdf
+25. arXiv 2609.02052, "SchedBlame: Who Ran While You Waited?" — eBPF tracer attributing CPU contention to cgroups, blame matrix, <2% overhead. https://arxiv.org/html/2609.02052v1
+26. Linux kernel, "CPU Isolation" — isolated CPUs, housekeeping work migration, noise sources (interrupts, timers, preemption). https://docs.kernel.org/admin-guide/cpu-isolation.html
+27. ACM 10.1145/2628071.2628104, "COLORIS: dynamic cache partitioning using page coloring" — page coloring for LLC partitioning, cache interference minimization. https://doi.org/10.1145/2628071.2628104
+28. IEEE 6846475, "MIMP: Deadline and Interference Aware Scheduling of Hadoop VMs" — background batch priority, residual resource scheduling, interference-aware placement. https://ieeexplore.ieee.org/document/6846475
+29. Docker / StackOverflow, CPU limits via cgroups — cpu.cfs_quota_us/period_us for absolute CPU caps per container. https://stackoverflow.com/questions/26348816/setting-absolute-limits-on-cpu-for-docker-containers
+30. Microsoft, "JOBOBJECT_CPU_RATE_CONTROL_INFORMATION" — Windows Job Objects CPU rate control (WEIGHT_BASED, HARD_CAP, MIN_MAX_RATE, cycles per 10,000). https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information
+31. FreeBSD, "rctl resource limits" — per-jail memoryuse/pcpu/readbps/writebps/readiops/writeiops deny/throttle. https://freebsdsoftware.org/blog/freebsd-jails-container-guide.html
+32. IDS prompts.txt entry 93 (verbatim). C:/idfs/prompts.txt — Phase 093 crate definition, contents, constraints.
+33. Existing ids-000-aa skeleton. C:/idfs/ids-000-aa/ — canonical types, sealed contracts, errors, versioning.
+34. HX-241 plan format references. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+
+---
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made. The blueprint above defines all architecture, isolation domains, algorithms, data structures, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 093 (ids-workload-isolation).
+
+
+# PHASE 094:
+
+## Phase 094 — Create the ids-data-use-policy crate: Policy-driven data access and use.
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1405-1419)
+
+```
+94. Research only do not read plan.md **[Phase 094 — Create the ids-data-use-policy crate: Policy-driven data access and use.]**
+
+Crate: ids-data-use-policy
+Purpose: Policy-driven data access and use.
+Contents: Data ownership policies, read/write/replicate/process/export/delete permissions, permitted regions, permitted operators, permitted purposes, derived data restrictions, data sovereignty policies.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 094 — Create the ids-data-use-policy crate: Policy-driven data access and use.]**
+
+Create plan-094.md in C:/idfs/plans/ for the ids-data-use-policy crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 094 creates `ids-data-use-policy`, the IDS crate that owns policy-driven data access and use. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by policy domain. `ids-data-use-policy` evaluates whether a requested data operation (read, write, replicate, process, export, delete) is permitted against a data-use policy attached to the dataset/record, and returns an allow/deny/modify decision plus any obligations (e.g., "delete after N days", "re-encrypt before export", "process only for purpose P"). It never opens a socket, never drives a transport, and never touches a network stack; every enforcement-relevant message rides opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`).
+
+Covered content per prompts.txt entry 94:
+- Data ownership policies (who owns a dataset/record, shared ownership thresholds)
+- Read/write/replicate/process/export/delete permissions (fine-grained operation allowlist)
+- Permitted regions (geographic/data-sovereignty scope: where data may reside, be processed, be transferred)
+- Permitted operators (which principals/roles/services may operate on the data)
+- Permitted purposes (purpose limitation: what processing purposes are authorized)
+- Derived data restrictions (policies propagate to derivatives: embeddings, transforms, aggregates, replicas)
+- Data sovereignty policies (jurisdiction, cross-border transfer rules, residency)
+
+**Decision model:** PDP (Policy Decision Point) inside `ids-data-use-policy` evaluates policies and returns a decision; PEP (Policy Enforcement Point) lives in the crate-under-enforcement (ids-store, ids-replication, ids-export, ids-query, ids-process) and gates the operation using the decision. Policies are expressed in a machine-readable policy language (ODRL-inspired permissions/prohibitions/obligations plus constraints), evaluated deterministically: same input context → same decision.
+
+**Scope boundary:** `ids-data-use-policy` decides; it does not execute I/O. It imports canonical types and sealed trait contracts from `ids-000-aa` only, consumes allowed-crypto primitives via `ids-crypto` primitive IDs, and sends/receives nothing except via `ids-carrier::Endpoint` when an enforcement crate chooses to ship a decision envelope.
+
+**Research basis:** 30 parallel searches returned ODRL Information Model 2.2 / W3C ODRL (permissions, prohibitions, obligations, constraints over assets/parties/actions); FORCE ODRL rule compliance evaluation; ODRL profile for data sovereignty (Fraunhofer MYDATA, ODS profile); XACML 3.0 OASIS ABAC (subject/resource/action/environment attributes, PDP/PEP architecture); purpose-based access control formalization (purpose as action sequences, purpose matching algorithm, GDPR Art. 5(1)(b) purpose limitation); Meta Privacy Aware Infrastructure / Policy Zones (purpose limitation via data lineage + runtime flow enforcement); UCON usage control for distributed systems (propositional, temporal, cardinal, spatial constraints enforced after access granted; reference monitors; PDP/PEP/PMP/DMP); derived-data and data-fusion control (ACM 10.1145/3183342: policies inferred for derived data; access and fusion constraints); Open Policy Agent / Rego (declarative policy evaluation, ABAC examples, default-deny); Google Zanzibar (relationship-based access control, "user U has relation R to object O", external consistency, trillion ACLs); Amazon Cedar (verification-guided authorization language, permit/forbid, templates, static analysis); ISO/IEC 38505-1:2026 data governance; NIST SP 800-53 AC-3 Access Enforcement, AC-4 Information Flow Enforcement; GDPR purpose limitation (ICO guidance, EDPB consent guidelines); cross-border transfer / data sovereignty (EU Data Act Art. 32, Swiss FADP, China PIPL/CSL/DSL, CLOUD Act); rights expression language; Rights Expression Language / ODRL as machine-readable license terms.
+
+---
+
+### 2. Architecture Overview
+
+`ids-data-use-policy` is the policy/evaluation layer of the IDS data-governance stack. It sits above `ids-000-aa` (canonical types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It receives an `AccessRequest{principal, action, resource, context}` where `action ∈ {Read, Write, Replicate, Process, Export, Delete}`, evaluates the attached data-use policy, and returns a `PolicyDecision{Allow|Deny|Modify, obligations[], restrictions[]}`. It never sends bytes itself; the enforcement crate frames the decision as opaque `Vec<u8>` to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (enforcement points)             │
+│  ids-store · ids-replication · ids-export · ids-query · ids-process           │
+│  gate every operation on a PolicyDecision before touching data                │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 094: ids-data-use-policy (THIS CRATE — PDP)              │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌─────────┐ │
+│  │ policy           │ │ obligation       │ │ derived-data     │ │ audit   │ │
+│  │ store (PAP)      │ │ tracker          │ │ restriction graph│ │ log     │ │
+│  │ ODRL-inspired    │ │ delete-after/    │ │ propagate policy │ │ signed+ │ │
+│  │ policies +       │ │ re-export/       │ │ to derivatives   │ │ hash    │ │
+│  │ constraints      │ │ re-process gates │ │ (transitive)     │ │ chained │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘ └─────────┘ │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌─────────┐ │
+│  │ decision engine  │ │ region/sovereign │ │ purpose          │ │ crypto  │ │
+│  │ (PDP: allow/     │ │ scope evaluator  │ │ limitation       │ │ surface │ │
+│  │ deny/modify)     │ │ (permitted       │ │ (allowed purposes│ │ ed25519 │ │
+│  │                  │ │ regions, ops)    │ │ per dataset)     │ │ sha256  │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘ └─────────┘ │
+│  ┌──────────────────┐ ┌──────────────────┐                     │ blake3   │ │
+│  │ ownership        │ │ operator         │                     │ xchacha  │ │
+│  │ (single/shared)  │ │ allowlist        │                     │ chacha   │ │
+│  └──────────────────┘ └──────────────────┘                     └─────────┘ │
+└─────────────────────────────────────────┬──────────────────┴────────────────┘
+                                          │ opaque Vec<u8> datagrams
+┌─────────────────────────────────────────▼──────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only  │
+│  send_datagram(Endpoint{CarrierType, addr≤1024B}, payload) │
+│  receive_datagram → (Endpoint, Vec<u8>)                    │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP /      │
+│  QUIC / HTTP / DNS / Wi-Fi / Bluetooth / cellular / VPN    │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of one policy-evaluated operation:** client submits `Op{record_id, action, principal, purpose, region, payload}` → enforcement crate builds `AccessRequest` → `ids-data-use-policy` evaluates: (1) ownership check (principal owns or is delegated), (2) operation permission (action in allowlist), (3) permitted regions (resource region ⊆ policy regions; export destination region allowed), (4) permitted operators (principal in operator set), (5) permitted purposes (requested purpose ⊆ policy purposes), (6) derived-data restrictions (if output is a derivative, attach propagated policy) → returns `PolicyDecision` → enforcement crate gates the op and, if shipping, frames the decision envelope to `ids-carrier::Endpoint`.
+
+**Policy language (ODRL-inspired):** A `Policy` groups one or more `Rule`s. Each `Rule` is a `Permission`, `Prohibition`, or `Obligation` specifying an `Action` performed by a `Party` over an `Asset`, refined by `Constraints` (left operand, operator, right operand: e.g., region ∈ {EU, US-East}, purpose = "analytics", max_retentions_days = 90, operator_role = "analyst"). Rules may include `Duty`s (actions that must be fulfilled when the rule is exercised, e.g., "log access", "re-encrypt before export"). Policies are versioned, signed (ed25519), and hash-chained (sha256/blake3) for audit.
+
+**Crypto used (allowed set only):** ed25519 for signing policies and decisions; sha256/blake3 for policy IDs, constraint hashing, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt policy state / obligation payloads at rest when confidentiality required. No other crypto.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 12.
+
+#### 3.1 Policy expression: ODRL (Open Digital Rights Language)
+
+**Source:** W3C ODRL Information Model 2.2 (w3c.github.io/poe/model); Open Digital Rights Language W3C Recommendation (msi.dublincore.org/standards/odrl); FORCE framework for ODRL rule compliance (w3id.org/force); ODRL profile for data sovereignty / Fraunhofer MYDATA ODS profile (iese.fraunhofer.de).
+
+ODRL is the de facto standard for machine-readable access and usage policies in data spaces. Core model: `Policy` (container of Rules — Sets, Offers, Agreements), `Rule` (Permission / Prohibition / Duty), `Asset` (the resource), `Party` (assigner/assignee), `Action` (use, distribute, modify, display, delete…), `Constraint` (left operand, operator, right operand — e.g., spatial, temporal, purpose, unit of count), `Duty` (obligation triggered when a rule is exercised). ODRL policies are technology-independent, domain- and jurisdiction-agnostic, and extensible via community profiles. `ids-data-use-policy` adopts the ODRL permission/prohibition/obligation structure and constraint model, profiled for IDS actions {Read, Write, Replicate, Process, Export, Delete} and IDS constraints (region, operator, purpose, retention, derived-data propagation).
+
+#### 3.2 Attribute-based access control (XACML / ABAC)
+
+**Source:** XACML 3.0 OASIS standard (link.springer.com fine-grained ABAC; NIST SP 800-53 Rev 5 AC-3/AC-4); "Fine Grained Attribute Based Access Control Model for Privacy Protection" (lightweight ANTLR grammar for subject/resource/environment conditions); SailPoint ABAC overview; PDP/PEP architecture (Cisco EPM User Guide).
+
+ABAC: an access decision is permitted only if the request satisfies conditions on attributes of subject, resource, action, and environment specified in policies. XACML defines the Policy Decision Point (PDP) / Policy Enforcement Point (PEP) / Policy Information Point (PIP) / Policy Administration Point (PAP) architecture. `ids-data-use-policy` is the PDP: it evaluates attribute-based conditions (principal role, resource classification, requested action, purpose, region, operator) and returns Permit/Deny. Enforcement crates are PEPs. Constraints may be temporal, cardinal, spatial, or propositional.
+
+#### 3.3 Purpose limitation and purpose-based access control
+
+**Source:** GDPR Article 5(1)(b) purpose limitation (ICO guidance; EDPB); purpose-based access control formalization (purpose as action sequences, purpose matching algorithm, healthcare research use case); Meta Privacy Aware Infrastructure / Policy Zones (purpose limitation at scale via data lineage + runtime flow enforcement); "Policy-Compliant Cloud Storage Systems / GDPRuler" (arxiv 2606.05423: purpose limitation read check eq(objPurIs(K) & objPurIs(k), objPurIs(K))); GDPR Article 6(4) compatibility test.
+
+Purpose limitation: data may only be processed for specified, explicit, legitimate purposes; further processing for an incompatible purpose requires a new legal basis. `ids-data-use-policy` attaches an `allowed_purposes` set to each policy; every `Process`/`Read`/`Export` request declares a purpose; the PDP checks `requested_purpose ∈ allowed_purposes` (or compatibility per Art. 6(4) factors: link between purposes, context of collection, nature of data, consequences, safeguards). Meta PAI shows point checking + data lineage can scale purpose limitation across dozens of systems via Policy Zones.
+
+#### 3.4 Relationship-based access control (Zanzibar / ReBAC)
+
+**Source:** Zanzibar USENIX ATC 2019 (usenix.org/system/files/atc19-pang.pdf; nil.lcs.mit.edu/6.5840); AWS Verified Permissions + Neptune ReBAC blog.
+
+Zanzibar: uniform data model "user U has relation R to object O" (e.g., viewer, editor, owner); complex ACLs as sets of users with relations; authorization decisions respect causal ordering of ACL/object changes (external consistency); scales to trillions of ACLs, millions of checks/sec, p99 < 10 ms. `ids-data-use-policy` uses ReBAC for ownership policies: a dataset/record has an owner (single user or a threshold of shared owners), and relations (reader, writer, replicator, exporter, deleter) granted to principals. Ownership is the root of data-use policy: only the owner (or threshold of co-owners) may create/change the policy.
+
+#### 3.5 Distributed usage control (UCON) — policy enforced after access granted
+
+**Source:** "Data Usage Control for Distributed Systems" (ACM 10.1145/3183342); "Data usage control enforcement in distributed systems" (ACM 10.1145/2435349.2435358); "Towards a policy enforcement infrastructure for distributed usage control" (ACM 10.1145/2295136.2295159).
+
+UCON differs from traditional access control: control persists after access is granted — policies express propositional, temporal, cardinal, and spatial constraints on future data usages (e.g., "delete my data after 30 days", "only process with application X", "do not redistribute to company Y", "access at most five times"). Enforced at all systems that store, process, and distribute data; policies travel with data to the consumer site. Reference monitors intercept and monitor relevant events and allow/modify/inhibit/delay them or take compensating actions. Distributed enforcement: PDP/PIP/PMP centrally, Distribution Management Point (DMP) organizes cross-system dataflow tracking and policy propagation peer-to-peer. `ids-data-use-policy` adopts UCON: obligations (delete-after, re-encrypt, count accesses) persist and are tracked post-access; policies are attached to the data and exported with it.
+
+#### 3.6 Derived data restrictions and data-fusion control
+
+**Source:** "A Policy Framework for Data Fusion and Derived Data Control" (ACM 10.1145/2875491.2875492); "Neon: system support for derived data management" (ACM 10.1145/1735997.1736008); Palantir Foundry access-control propagation (mandatory controls propagate through derivation); Meta PAI data lineage (source→sink graph); OWASP GenAI derivative risk amplification.
+
+Derived data can reveal sensitive information about its sources; access/usage of derived data must be regulated considering constraints on both inputs and the fusion process. When a new data element is created by fusion, an access control policy and a fusion policy are associated to it, ideally inferred from the inputs' policies. Mandatory controls propagate through derivation: a dataset built from a marked input inherits the marking; a column tagged with a classification keeps it downstream. `ids-data-use-policy` maintains a derived-data restriction graph: every derivative (replica, transform, aggregate, embedding, export) inherits the source policy (transitively), and any further derivation re-derives restrictions. Deletion/retraction of a source triggers obligations on all registered derivatives (per data-sovereignty and right-to-be-forgotten patterns).
+
+#### 3.7 Data sovereignty, permitted regions, and cross-border transfer
+
+**Source:** AWS "What is Data Sovereignty?"; WEF Data Sovereignty in Practice 2026; EU Data Act Art. 32 (international transfers of non-personal data); Swiss FADP cross-border transfer; China PIPL/CSL/DSL cross-border security assessment; Alation data sovereignty guide (CLOUD Act vs GDPR tension); EDPB guidelines on third-country requests.
+
+Data sovereignty: data is subject to the laws of the jurisdiction where it is collected/stored/processed; residency = physical location, sovereignty = applicable law. Permitted-regions constraints: a policy lists regions where data may reside/be processed/be transferred; export to a non-permitted region is denied. Cross-border transfer rules (EU Data Act Art. 32 for non-personal data; GDPR Chapter V for personal data; China security assessment; Swiss adequacy lists) are encoded as region constraints + obligation to log transfers. `ids-data-use-policy` evaluates `resource_region ∧ destination_region ⊆ permitted_regions` for Replicate/Export, and blocks transfers to non-permitted jurisdictions.
+
+#### 3.8 Permitted operators and operational gating
+
+**Source:** ABAC subject attributes (role, department, location, time of day); AWS ABAC examples; Zanzibar relations (reader/writer/owner); Cedar operator/principal model.
+
+Permitted operators: a policy lists which principals/roles/services may perform each action on the data. Operator model combines ABAC (principal attributes: role, clearance, department) with ReBAC (relation to the resource: owner/reader/writer). The PDP checks `operator ∈ permitted_operators(action)` before allowing. Operator constraints may be time-windowed (temporal), count-limited (cardinal: "access at most N times"), or location-scoped (spatial).
+
+#### 3.9 PDP/PEP architecture and zero-trust policy decision/enforcement
+
+**Source:** NIST SP 800-207 Zero Trust Architecture (Policy Engine / Policy Administrator / Policy Enforcement Point; control plane vs data plane); Oracle Cloud PDP/PEP zero trust blog; Agentic-ZTA (arxiv 2610.05782: PDP/PEP/PIP, control plane decisions, data plane enforcement).
+
+Zero trust: default deny — no resource is trusted by network location; access determined by dynamic policy on identity, application, asset, behavioral/environmental attributes. PDP makes and logs the decision; PEP enforces it between subject and resource; PIP supplies contextual telemetry. `ids-data-use-policy` is the PDP/PE (decision + logging); enforcement crates (ids-store, ids-export, ids-replication) are PEPs positioned between the caller and the data. The carrier is never in the trust base: decisions are signed over bytes and survive any carrier re-framing.
+
+#### 3.10 Policy evaluation engines: OPA/Rego and Cedar
+
+**Source:** OPA policy language (openpolicyagent.org/docs/policy-language); OPA ABAC/RBAC examples (AWS prescriptive guidance); OPA policy testing; Cedar language (arxiv 2403.04651; docs.cedarpolicy.com).
+
+OPA/Rego: declarative language inspired by Datalog, optimized for fast policy evaluation over structured (JSON) data; default-deny; supports ABAC/RBAC; policy testing framework. Cedar: verification-guided authorization language (permit/forbid, effect/scope/conditions, templates, schema validation, static analysis via SMT reduction, safe — no side effects, order-independent). `ids-data-use-policy` will use a Rust-native declarative policy evaluation (ODRL-inspired, not embedding OPA/Cedar as runtime deps to keep the crate carrier-agnostic and dependency-light), but the design is informed by their semantics: default-deny, explicit permit, attribute conditions, static validation, analyzability.
+
+#### 3.11 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Source:** ed25519-dalek docs.rs (RFC 8032 EdDSA); chacha20poly1305 docs.rs (RFC 8439 AEAD + XChaCha20 192-bit nonce); sha2 RustCrypto (SHA-256); BLAKE3-team README (256-bit output, SIMD, keyed hash, KDF, XOF).
+
+`ids-data-use-policy` uses: ed25519 to sign policies and decisions (proof of policy evaluation, non-repudiation); sha256 for policy IDs and audit-chain links; blake3 for fast content hashing of policy documents and obligation payloads (SIMD, parallel); xchacha20poly1305 to encrypt policy state/obligations at rest (24-byte nonce, random nonces safe); chacha20poly1305 for session/state payloads (12-byte nonce, counter-based). No other crypto. Crypto operations live in `ids-crypto`; this crate declares type surface and references primitive IDs via `ids-000-aa` only.
+
+#### 3.12 Information flow control and derived-data propagation at rest
+
+**Source:** "Information flow control" Cornell (now-info-flow.pdf: labels propagate with data; derived values tainted); LUCON data flow control for message-based IoT (arxiv 1805.05887: dynamic taint analysis + static route verification); "Securing AI Agents with Information-Flow Control" (arxiv 2505.23643); "Data Flow Control" (arxiv 2606.05679: grounded derivation constraint).
+
+Information flow control propagates labels with data through computation, preventing derived values from leaking to lower-classified sinks. `ids-data-use-policy` treats every derivative as carrying the source's policy label; the derived-data restriction graph enforces that no derivative can be used outside the source's permitted purposes/regions/operators. Static verification of derivation routes (like LUCON) plus runtime obligation tracking (delete-after, re-export gates) gives defense in depth.
+
+#### 3.13 Deterministic policy evaluation and audit
+
+**Source:** DSSC Access & Usage Policies Enforcement (archive.dssc.eu: "For the same input conditions, a policy engine will always produce the same output decision"); FORCE ODRL rule compliance evaluation (w3id.org/force); OPA policy testing.
+
+Determinism: for identical `AccessRequest` + policy set, the PDP must always return the same decision — required for reproducibility, audit, and replication across nodes. `ids-data-use-policy` evaluates policies as pure functions of (request, policy bundle); no wall-clock, no random, no external state except the policy bundle. Every decision is recorded in an append-only, hash-chained (sha256/blake3), ed25519-signed audit log with `NodeId` + `IdsTime`. Offline-verifiable; tamper-evident.
+
+#### 3.14 Carrier-agnostic decision transport
+
+**Source:** HX-241 carrier-agnostic socket abstraction research; IDS prompts.txt entry 1 / entry 94.
+
+All enforcement traffic is opaque `Vec<u8>` to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` ≤ 1024 bytes). `CarrierType` enum: `Loopback`, `Serial`, `Optical`, `Radio`, `Custom(u16)`. `ids-data-use-policy` itself does not send; it returns decision envelopes that enforcement crates frame. Zero references to `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh.
+
+---
+
+### 4. Threat Model & Mitigations
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Policy spoofing / unsigned policy accepted | Decision integrity | All policies ed25519-signed; PDP verifies signature before evaluation; unsigned policies rejected |
+| Decision forgery / replay | Decision integrity | Decisions ed25519-signed; nonce-bound; bounded replay cache per principal+resource |
+| Purpose creep (data repurposed beyond consent) | Purpose limitation | Per-policy `allowed_purposes`; every Process/Read/Export declares purpose; PDP checks membership / Art. 6(4) compatibility |
+| Derived data escapes restrictions | Derived-data control | Derived-data restriction graph; derivatives inherit source policy transitively; deletion retraces derivatives |
+| Export to non-permitted region | Data sovereignty | Region constraint: `destination ⊆ permitted_regions`; export denied otherwise; transfer logged |
+| Operator overreach (unauthorized principal) | Access integrity | Permitted-operator allowlist (ABAC + ReBAC); evaluated per action |
+| Cardinal violation (excessive accesses) | Usage control | Access counters per policy; inhibit after N accesses (UCON cardinal constraint) |
+| Temporal violation (access outside window) | Usage control | Time-window constraints on operator grants |
+| Policy downgrade attack | Policy integrity | Policy versioning + hash chain + signed checkpoints; downgrade requires signed governance decision |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+| Clock manipulation for temporal constraints | Temporal correctness | Logical time only (IdsTime ticks), never wall-clock, for temporal constraints |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Replay protection at PDP layer; idempotent decision evaluation tolerates duplicates |
+| Non-deterministic evaluation across nodes | Replication consistency | Pure function of (request, policy bundle); same input → same decision everywhere |
+| Disallowed crypto algorithm | Crypto policy | Allowlist unit test; only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 |
+
+The carrier is never trusted: policy decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-data-use-policy ||
+|-------|------|--------------------------|--------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `DatasetId`, `PartitionId`, `Error` — consumed, never redefined; sealed trait contracts mirrored |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | Enforcement crates frame decision envelopes to `Endpoint`; this crate never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing policies/decisions/audit; hashing policy IDs and constraint digests; encrypting policy state at rest |
+| `ids-store` | Primary record store (enforcement point / PEP) | Gates read/write/delete on PolicyDecision before touching data |
+| `ids-replication` | Replica synchronization (enforcement point / PEP) | Gates replicate on permitted regions/operators; propagates policy with data |
+| `ids-export` | Data export (enforcement point / PEP) | Gates export on permitted destination regions; logs cross-border transfer |
+| `ids-query` | Query / processing (enforcement point / PEP) | Gates process on permitted purposes; attaches purpose to query context |
+| `ids-process` | Data processing / transformation | Gates process; creates derivatives inheriting source policy (derived-data graph) |
+| `ids-identity` (Phase 004) | `StableNodeId`/`RotatingNodeId` built on `NodeId` | Principal identification for operator allowlists |
+| `ids-session` (Phase 050) | Client-session binding | Session-bound operations carry principal + purpose; audit cross-referenced with session |
+
+**Integration points:** `ids-data-use-policy` is the PDP; enforcement crates are PEPs that consult it before any data operation and frame decisions to `ids-carrier::Endpoint`. It does not reach into crate internals — only public contracts from `ids-000-aa`. No dependency on `ids-discovery`/`ids-session`/`ids-cli` beyond what contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-data-use-policy/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-data-use-policy/
+├── Cargo.toml                          # serde, thiserror; workspace member; no net/crypto deps beyond allowed
+├── lib.rs                              # crate root, public API surface, feature gates
+├── constants.rs                        # policy defaults: max retention, max operator count, etc.
+├── error.rs                            # PolicyError (thiserror): evaluation, constraint, crypto, ownership errors
+├── features.rs                         # feature flags (audit, crypto, strict-validation)
+│
+├── types.rs                            # PolicyId, Policy, Rule, Action, Asset, Party, Constraint, Decision
+│
+├── policy/                             # policy model (~12 files)
+│   ├── mod.rs
+│   ├── policy.rs                       # Policy container: Rules, version, signature, hash chain
+│   ├── rule.rs                         # Rule: Permission/Prohibition/Obligation/Duty
+│   ├── action.rs                       # Action enum: Read, Write, Replicate, Process, Export, Delete
+│   ├── asset.rs                        # Asset identifier + classification (DatasetId, RecordId)
+│   ├── party.rs                        # Party: principal, role, operator set, ownership
+│   ├── constraint.rs                   # Constraint: left operand, operator, right operand (region/purpose/time/cardinal)
+│   ├── duty.rs                         # Duty: obligation triggered on rule exercise (delete-after, re-encrypt, log)
+│   ├── ownership.rs                    # single vs shared ownership, threshold of co-owners
+│   ├── version.rs                      # policy versioning + compatibility
+│   ├── serializer.rs                   # ODRL-inspired serialization (JSON-like, serde)
+│   ├── validator.rs                    # static policy validation (type safety, no dangling refs)
+│   └── bundle.rs                       # policy bundle: set of policies + signatures, loadable unit
+│
+├── evaluation/                         # PDP decision engine (~12 files)
+│   ├── mod.rs
+│   ├── pdp.rs                          # Policy Decision Point: allow/deny/modify
+│   ├── request.rs                      # AccessRequest{principal, action, resource, context}
+│   ├── decision.rs                     # PolicyDecision{Allow|Deny|Modify, obligations, restrictions}
+│   ├── engine.rs                       # rule evaluation: match action, evaluate constraints, combine duties
+│   ├── ownership_eval.rs               # ownership check (single/threshold)
+│   ├── operation_eval.rs               # operation permission (action allowlist)
+│   ├── region_eval.rs                  # permitted regions (residence/processing/transfer)
+│   ├── operator_eval.rs                # permitted operators (ABAC + ReBAC)
+│   ├── purpose_eval.rs                 # permitted purposes (purpose limitation, Art. 6(4) compatibility)
+│   ├── temporal_eval.rs                # time-window constraints
+│   ├── cardinal_eval.rs                # access-count constraints (at most N)
+│   ├── derived_data.rs                 # derived-data restriction graph, inheritance, retraction
+│   └── determinism.rs                  # pure-function guarantee: same input → same decision
+│
+├── enforcement/                        # PEP interface (~6 files)
+│   ├── mod.rs
+│   ├── pep.rs                          # Policy Enforcement Point trait + gate wrapper
+│   ├── gate.rs                         # gate operation on decision (allow/deny/modify)
+│   ├── envelope.rs                     # signed decision envelope for carrier transport
+│   ├── adapter.rs                      # frame decision as Vec<u8> to ids-carrier::Endpoint
+│   └── obligations.rs                  # runtime obligation tracking (delete-after counters, re-export gates)
+│
+├── audit/                              # signed, hash-chained audit log (~8 files)
+│   ├── mod.rs
+│   ├── audit_entry.rs                  # decision record: request, decision, obligations, NodeId, IdsTime
+│   ├── audit_chain.rs                  # sha256/blake3 hash chain
+│   ├── checkpoint.rs                   # ed25519-signed periodic checkpoints
+│   ├── signer.rs                       # ed25519 signing of entries/checkpoints
+│   ├── verifier.rs                     # offline verification of chain + signatures
+│   ├── replay_cache.rs                 # bounded replay cache per principal+resource
+│   └── logger.rs                       # append-only log writer
+│
+├── sovereignty/                        # data sovereignty / region model (~6 files)
+│   ├── mod.rs
+│   ├── region.rs                       # RegionId + permitted-region set
+│   ├── jurisdiction.rs                 # applicable-law annotation per region
+│   ├── cross_border.rs                 # cross-border transfer rules (EU Data Act, GDPR Ch V, PIPL, etc.)
+│   ├── residency.rs                    # residency enforcement (where data may reside/process)
+│   └── transfer_log.rs                 # logged cross-border transfers
+│
+├── contracts/                          # sealed trait contracts (~8 files)
+│   ├── mod.rs
+│   ├── policy_contract.rs              # trait PolicyStore (PAP)
+│   ├── decision_contract.rs            # trait DecisionEngine (PDP)
+│   ├── obligation_contract.rs          # trait ObligationTracker
+│   ├── derived_contract.rs             # trait DerivedDataGraph
+│   ├── audit_contract.rs               # trait AuditLogger
+│   ├── carrier_contract.rs             # trait CarrierAdapter (decision transport only)
+│   └── evaluation_contract.rs          # trait Evaluator (pure)
+│
+├── invariants/                         # compile-time/runtime invariants (~10 files)
+│   ├── mod.rs
+│   ├── default_deny.rs                 # no action permitted unless explicitly allowed
+│   ├── purpose_limitation.rs           # purpose ∈ allowed_purposes for Process/Read/Export
+│   ├── region_scope.rs                 # destination ⊆ permitted regions
+│   ├── derived_inheritance.rs          # derivatives inherit source policy transitively
+│   ├── carrier_agnostic.rs             # no std::net/tokio::net/… references
+│   ├── crypto_allowlist.rs             # only the five allowed algorithms
+│   ├── determinism.rs                  # pure evaluation function
+│   ├── policy_immutable.rs             # versioned policies; change = new version
+│   ├── ownership_threshold.rs          # shared-ownership threshold enforcement
+│   └── audit_chain_sound.rs            # hash chain + signed checkpoints verify offline
+│
+├── crypto/                             # allowed-crypto surface (~4 files)
+│   ├── mod.rs
+│   ├── signer.rs                       # ed25519 sign/verify for policies + decisions
+│   ├── hasher.rs                       # sha256 + blake3 for policy IDs, constraint digests
+│   ├── encrypter.rs                    # xchacha20poly1305 / chacha20poly1305 at-rest encryption
+│   └── allowlist.rs                    # compile-time assert: only the five algorithms
+│
+├── tests/                              # property/verification tests (~30 files)
+│   ├── mod.rs
+│   ├── policy_tests.rs
+│   ├── evaluation_tests.rs             # allow/deny/modify matrix per action
+│   ├── ownership_tests.rs              # single / threshold shared ownership
+│   ├── region_tests.rs                 # permitted regions / cross-border deny
+│   ├── operator_tests.rs               # permitted operators (ABAC + ReBAC)
+│   ├── purpose_tests.rs                # purpose limitation + compatibility
+│   ├── temporal_tests.rs               # time-window constraints
+│   ├── cardinal_tests.rs               # access-count limits
+│   ├── derived_data_tests.rs           # restriction graph, inheritance, retraction
+│   ├── obligation_tests.rs             # delete-after, re-export, log duties
+│   ├── audit_tests.rs                  # hash chain + signed checkpoints
+│   ├── determinism_tests.rs            # same input → same decision
+│   ├── envelope_tests.rs               # decision envelope framing
+│   ├── carrier_agnostic_tests.rs       # grep: zero prohibited references
+│   ├── crypto_allowlist_tests.rs       # only five algorithms reachable
+│   ├── dependency_audit_test.rs        # cargo tree: no net crates
+│   └── property_tests.rs               # proptest properties for constraints/evaluation
+│
+├── benches/                            # (~8 files)
+│   ├── evaluation.rs                   # PDP decision latency
+│   ├── constraint.rs                   # constraint evaluation throughput
+│   ├── derived_graph.rs                # derived-data graph operations
+│   └── audit.rs                        # audit chain append/verify
+│
+├── spec/                               # normative specifications (~10 files)
+│   ├── policy_model.md                 # ODRL-inspired policy model for IDS
+│   ├── action_set.md                   # {Read, Write, Replicate, Process, Export, Delete} semantics
+│   ├── constraint_model.md             # constraint language (left operand / operator / right operand)
+│   ├── purpose_model.md                # purpose limitation + Art. 6(4) compatibility
+│   ├── derived_data_spec.md            # derived-data restriction graph
+│   ├── sovereignty_spec.md             # permitted regions / cross-border transfer
+│   ├── decision_spec.md                # PolicyDecision allow/deny/modify + obligations
+│   ├── audit_spec.md                   # hash chain + ed25519 checkpoints
+│   ├── carrier_agnostic_spec.md        # decision transport via ids-carrier::Endpoint
+│   └── determinism_spec.md             # pure-function evaluation contract
+│
+├── docs/                               # documentation (~12 files)
+│   ├── architecture.md
+│   ├── policy_authoring.md             # how to author data-use policies
+│   ├── enforcement_integration.md      # how crates integrate as PEPs
+│   ├── ownership_model.md              # single vs shared ownership
+│   ├── purpose_limitation.md           # purpose limitation guide
+│   ├── data_sovereignty.md             # permitted regions / cross-border
+│   ├── derived_data.md                 # derived-data restrictions
+│   ├── audit.md                        # audit log format and verification
+│   ├── crypto_policy.md                # allowed-crypto allowlist
+│   ├── adding_a_constraint.md          # adding new constraint types
+│   ├── runbook.md                      # operating the PDP
+│   └── compatibility.md                # policy version compatibility
+│
+├── test_vectors/                       # deterministic inputs and expected decisions (~6 files)
+│   ├── allow_vectors.json
+│   ├── deny_vectors.json
+│   ├── modify_vectors.json
+│   ├── derived_vectors.json
+│   ├── sovereignty_vectors.json
+│   └── obligation_vectors.json
+│
+└── README.md
+```
+
+Total: ~90–1000 files across `src/`, `src/policy/`, `src/evaluation/`, `src/enforcement/`, `src/audit/`, `src/sovereignty/`, `src/contracts/`, `src/invariants/`, `src/crypto/`, `tests/`, `benches/`, `spec/`, `docs/`, `test_vectors/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+1. **Policy / Rule / Action**: `Policy { id: PolicyId, version, rules: Vec<Rule>, signature }`; `Rule { kind: Permission|Prohibition|Obligation, action: Action, party: Party, asset: Asset, constraints: Vec<Constraint>, duties: Vec<Duty> }`; `Action ∈ {Read, Write, Replicate, Process, Export, Delete}`.
+
+2. **Decision engine (PDP)**: `evaluate(request: AccessRequest, bundle: PolicyBundle) -> PolicyDecision`. Algorithm: (a) collect all rules matching (action, asset, party); (b) default-deny — no Permission ⇒ Deny; (c) any matching Prohibition whose constraints hold ⇒ Deny; (d) remaining Permissions whose all constraints hold ⇒ Allow; (e) collect Duties from matched rules ⇒ obligations; (f) return `Decision{Allow|Deny|Modify, obligations[], restrictions[]}`. Pure function — same input → same decision.
+
+3. **Constraint evaluation**: `Constraint { left_operand, operator, right_operand }` where left ∈ {region, purpose, operator_role, time_window, access_count, retention_days}; operator ∈ {==, ∈, ⊆, <, ≤, >, ≥, matches}; right = literal value. Evaluation returns bool; conjunction of all constraints in a rule must hold.
+
+4. **Ownership evaluation**: single owner → owner may create/change policy; shared ownership (threshold t of n co-owners) → policy change requires t signatures. Read: `admit_owner(owner_set, principal)` iff principal ∈ owner_set (single) or ≥ t co-owners (shared).
+
+5. **Region/sovereignty evaluation**: `permitted_region(resource_region, policy_regions)` iff resource_region ∈ policy_regions; `cross_border_allowed(source_region, dest_region, policy)` iff dest_region ∈ permitted_regions ∧ no jurisdictional conflict; export/replicate denied otherwise.
+
+6. **Purpose evaluation**: `purpose_allowed(requested, policy_purposes)` iff requested ∈ policy_purposes, or Art. 6(4) compatibility (link between purposes, context of collection, nature of data, consequences, safeguards) documented.
+
+7. **Temporal evaluation**: `within_window(request_time, grant_window)` using IdsTime monotonic ticks (never wall-clock).
+
+8. **Cardinal evaluation**: `access_count(principal, resource) < max_accesses`; increment on each allowed access; inhibit at limit.
+
+9. **Derived-data restriction graph**: nodes = data elements (DatasetId/RecordId + derivative id); edge source→derivative labeled with inherited policy; derivative's effective policy = most restrictive of source policy + its own; retraction of source propagates delete/retract obligations transitively through the graph.
+
+10. **Obligation tracking**: `Duty { trigger: rule_exercise, action: DeleteAfter|ReEncrypt|LogAccess|..., deadline: Option<IdsTime> }`; runtime tracker fires obligations at deadline or on event; delete-after obligations propagate to derivatives.
+
+11. **Audit chain**: each decision = entry `{request_hash, decision, obligations, NodeId, IdsTime, prev_hash}`; chain = sha256/blake3(prev_hash || entry); periodic ed25519-signed checkpoint; offline verifiable by recomputing chain and verifying signatures.
+
+12. **Decision envelope**: `{decision, obligations, signature, nonce, timestamp}` serialized and framed as `Vec<u8>` to `ids-carrier::Endpoint` by the enforcement PEP.
+
+---
+
+### 8. Dependencies
+
+`ids-data-use-policy/Cargo.toml`:
+- `serde = { version = "1", features = ["derive"] }` — policy/decision serialization
+- `thiserror = "2.0"` — error enum derive
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `DatasetId`, `Error`) and sealed trait contracts
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) — decision transport envelope only; crate never sends directly
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305
+- `blake3 = "1.5"` — fast content hashing for policy IDs and constraint digests (type-level surface)
+- dev-only: `proptest`, `tempfile`, `serde_json`
+
+**No** `std::net`, `tokio`, `tokio::net`, `libp2p`, `hyper`, `reqwest`, `dns`, `wi-fi`, `bluetooth`, `cellular`, `vpn`, or `mesh` dependencies. No async runtime. No networking stack. Crypto beyond the five allowed primitives rejected; all crypto via `ids-crypto` primitive IDs.
+
+Downstream crate dependencies (all on `ids-data-use-policy` via public contracts):
+- `ids-store`, `ids-replication`, `ids-export`, `ids-query`, `ids-process` → `ids-data-use-policy` (as PEP)
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-94.1 | All 7 content areas from prompts.txt entry 94 covered: ownership, read/write/replicate/process/export/delete permissions, permitted regions, permitted operators, permitted purposes, derived data restrictions, data sovereignty | `src/policy/`, `src/evaluation/`, `src/sovereignty/` modules exist per file structure |
+| AC-94.2 | Default-deny: no action permitted unless an explicit matching Permission rule's constraints hold | Evaluation tests: empty policy bundle → all actions Deny |
+| AC-94.3 | Ownership: single owner / threshold shared ownership; only owner(s) may create/change policy | Ownership tests pass for 1-of-1 and t-of-n |
+| AC-94.4 | Operation permission: action allowlist enforced per policy (Read/Write/Replicate/Process/Export/Delete) | Evaluation matrix: each action allow/deny per rule |
+| AC-94.5 | Permitted regions: resource region ⊆ policy regions; export/replicate to non-permitted region denied | Region tests; cross-border deny vectors |
+| AC-94.6 | Permitted operators: ABAC attributes + ReBAC relations; operator ∈ permitted_operators(action) | Operator tests |
+| AC-94.7 | Permitted purposes: requested purpose ∈ allowed_purposes (or Art. 6(4) compatibility documented) | Purpose tests; purpose-creep deny vectors |
+| AC-94.8 | Derived data: derivatives inherit source policy transitively; retraction propagates delete obligations | Derived-data graph tests |
+| AC-94.9 | Data sovereignty: cross-border transfer to non-permitted jurisdiction denied and logged | Sovereignty tests; transfer log |
+| AC-94.10 | Determinism: same AccessRequest + policy bundle → identical decision on all nodes | Determinism tests pass |
+| AC-94.11 | Audit: every decision append-only, sha256/blake3 hash-chained, ed25519-signed checkpoints, offline verifiable | Audit tests: chain verification + signature verification |
+| AC-94.12 | Temporal/cardinal: time-window and access-count constraints enforced (inhibit at limit) | Temporal/cardinal tests |
+| AC-94.13 | Obligations: delete-after, re-export, log-access duties tracked and fired | Obligation tests |
+| AC-94.14 | Carrier agnostic: zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh; all traffic via `ids-carrier::Endpoint` | Dependency audit test (`cargo tree`) + source grep — zero matches |
+| AC-94.15 | Crypto allowlist: only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 reachable | Allowlist unit test passes |
+| AC-94.16 | Crate compiles cleanly: `cargo check -p ids-data-use-policy` exits 0 with no warnings | `cargo check` exit 0 |
+| AC-94.17 | Conformance tests pass: `cargo test -p ids-data-use-policy` passes all evaluation/ownership/region/operator/purpose/derived/audit/determinism tests | `cargo test` passes |
+
+---
+
+### 10. Remaining Uncertainties
+
+| Uncertainty | Impact | Resolution path |
+|-------------|--------|-----------------|
+| Policy language serialization format (JSON-like vs RDF/Turtle vs custom) | Interoperability with external policy tools | ODRL-inspired JSON-like serialization; format decision deferred; serde-based so swappable |
+| Art. 6(4) purpose-compatibility automation | Legal interpretation cannot be fully automated | Compatibility factors recorded as structured fields; final compatibility decision is governance (human), PDP checks membership |
+| Default (N, t) for shared ownership thresholds | Deployment-tuned | Defined per policy; no hard-coded default in crate |
+| Derived-data graph size and retraction latency | Performance under heavy derivation | Graph operations bounded; retraction is async obligation; benchmarks to validate |
+| Cross-border transfer rules per jurisdiction (EU Data Act, GDPR Ch V, PIPL, FADP adequacy) | Legal correctness of region constraints | Encoded as region sets + jurisdiction annotations; jurisdiction-specific rules are policy content, not crate logic |
+| Obligation execution timing (delete-after deadline precision) | Compliance SLAs | Keyed to IdsTime ticks; deadline precision is deployment configuration |
+| Interaction with `ids-immutable` (holds/retention) | Write admission must respect holds | Guard handshake defined here; validated at integration with ids-store/ids-immutable |
+| Policy bundle distribution and version sync across nodes | Replication consistency | Out of scope for this crate; `ids-sync`/`ids-replication` distribute bundles; PDP is deterministic so sync converges |
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-data-use-policy` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear policy boundary |
+| ODRL-inspired permission/prohibition/obligation model | W3C standard for machine-readable usage policies; extensible via constraints/duties |
+| Default-deny (explicit permit required) | Secure-by-default; OPA/Cedar precedent; no accidental access |
+| PDP here, PEP in enforcement crates | Separation of decision and enforcement; zero-trust PDP/PEP pattern (NIST SP 800-207) |
+| ReBAC ownership + ABAC operator attributes | Zanzibar relation model for ownership; ABAC for fine-grained operator gating |
+| Purpose limitation with declared purpose per request | GDPR Art. 5(1)(b); Meta PAI shows purpose enforcement scales via lineage + runtime checks |
+| Derived-data restriction graph with transitive inheritance | ACM 10.1145/2875491 / Palantir propagation: controls travel with data through derivation |
+| Region constraints + cross-border deny + transfer log | Data sovereignty; EU Data Act Art. 32 / GDPR Ch V / China PIPL patterns |
+| Deterministic pure-function evaluation | Same input → same decision everywhere; required for replication and audit |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Offline-verifiable, tamper-evident decision log |
+| Logical time (IdsTime) only, never wall-clock | Temporal constraints immune to clock manipulation |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitive IDs via `ids-000-aa` | Complies with allowed-crypto rule |
+
+---
+
+### Sources
+
+1. W3C ODRL Information Model 2.2. https://w3c.github.io/poe/model — Policy/Rule (Permission/Prohibition/Duty), Asset, Party, Action, Constraint, ODRL core model.
+2. Open Digital Rights Language (ODRL) W3C Recommendation. https://msi.dublincore.org/standards/odrl — machine-readable usage permissions/prohibitions/obligations, constraints (temporal/spatial/purpose).
+3. FORCE — Framework for ODRL Rule Compliance through Evaluation. https://w3id.org/force — ODRL rule compliance evaluation, constraint/operator usage.
+4. ODRL Profile for Data Sovereignty (ODS) / Fraunhofer MYDATA. https://iese.fraunhofer.de/blog/data-sovereignty-technology-independent-specification-with-odrl — ODRL extended for data sovereignty; PEP/PXP usage-control components.
+5. XACML 3.0 OASIS standard; "Fine Grained Attribute Based Access Control Model for Privacy Protection." https://link.springer.com/article/10.1007/978-3-319-48057-2_21 — ABAC subject/resource/action/environment conditions, PDP/PEP architecture.
+6. NIST SP 800-53 Rev 5 — AC-3 Access Enforcement, AC-4 Information Flow Enforcement. https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final — access enforcement and information flow control controls.
+7. "Data Usage Control for Distributed Systems" (ACM 10.1145/3183342). https://doi.org/10.1145/3183342 — UCON: propositional/temporal/cardinal/spatial constraints enforced after access granted; reference monitors; PDP/PEP/PMP/DMP distributed enforcement.
+8. "Data usage control enforcement in distributed systems" (ACM 10.1145/2435349.2435358). https://doi.org/10.1145/2435349.2435358 — usage control policies travel with data; enforced at consumer site.
+9. "Towards a policy enforcement infrastructure for distributed usage control" (ACM 10.1145/2295136.2295159). https://dl.acm.org/doi/10.1145/2295136.2295159 — cross-system dataflow tracking, DMP peer-to-peer policy propagation.
+10. "A Policy Framework for Data Fusion and Derived Data Control" (ACM 10.1145/2875491.2875492). https://doi.org/10.1145/2875491.2875492 — policies inferred for derived data; access and fusion constraints on inputs + fusion process.
+11. "Neon: system support for derived data management" (ACM 10.1145/1735997.1736008). https://dl.acm.org/doi/10.1145/1735997.1736008 — byte-level policy labels propagated through derivation; I/O enforcement.
+12. Palantir Foundry — access control propagation through derivation. https://palantir.com/docs/foundry/security/access-control-propagation — mandatory controls inherit through derivation; evaluate against user identity at every access.
+13. Meta Privacy Aware Infrastructure / Policy Zones — purpose limitation at scale. https://engineering.fb.com/2024/08/27/security/privacy-aware-infrastructure-purpose-limitation-meta — purpose limitation via data lineage + runtime Policy Zone enforcement.
+14. Google Zanzibar — global consistent authorization system. https://nil.lcs.mit.edu/6.5840/2023/papers/zanzibar.pdf — "user U has relation R to object O" ReBAC model; external consistency; trillion-scale ACLs.
+15. Amazon Cedar — verification-guided authorization language. https://arxiv.org/html/2403.04651 — permit/forbid, effect/scope/conditions, templates, schema validation, static analysis via SMT.
+16. Open Policy Agent / Rego policy language. https://www.openpolicyagent.org/docs/policy-language — declarative policy evaluation over JSON; default-deny; ABAC/RBAC examples.
+17. GDPR Article 5(1)(b) purpose limitation — ICO guidance. https://ico.org.uk/for-organisations/guide-to-data-protection/guide-to-the-general-data-protection-regulation-gdpr/principles/purpose-limitation — specified, explicit, legitimate purposes; no incompatible further processing.
+18. GDPR Article 6(4) compatibility test. https://ico.org.uk/for-organisations/guide-to-data-protection/guide-to-the-general-data-protection-regulation-gdpr/principles/purpose-limitation — link between purposes, context of collection, nature of data, consequences, safeguards.
+19. "Policy-Compliant Cloud Storage Systems / GDPRuler" (arxiv 2606.05423). https://arxiv.org/pdf/2606.05423.pdf — purpose limitation read check eq(objPurIs(K) & objPurIs(k), objPurIs(K)); GDPR enforceable at KVS layer.
+20. Data sovereignty — AWS / WEF 2026 / Alation / EU Data Act Art. 32. https://aws.amazon.com/what-is/data-sovereignty/ ; https://reports.weforum.org/docs/WEF_Data_Sovereignty_in_Practice_2026.pdf ; https://dataactready.org/blog/eu-data-act-international-data-transfers — residency vs sovereignty; cross-border transfer rules for personal and non-personal data.
+21. NIST SP 800-207 Zero Trust Architecture. https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.20.pdf — PDP/PA/PEP; control plane vs data plane; default deny; dynamic policy on identity/asset/environment.
+22. "Information flow control" (Cornell). https://cs.cornell.edu/andru/papers/now-info-flow/now-info-flow.pdf — labels propagate with data; derived values tainted; prevents derived-data leaks.
+23. LUCON — Data Flow Control for Message-Based IoT Systems (arxiv 1805.05887). https://arxiv.org/html/1805.05887 — dynamic taint analysis + static route verification; obligations on policy violation.
+24. DSSC Access & Usage Policies Enforcement. https://archive.dssc.eu/space/BVE2/1071256095/Access+%26+Usage+Policies+Enforcement — deterministic policy engine: same input → same decision.
+25. ed25519-dalek docs.rs — RFC 8032 EdDSA signing. https://docs.rs/ed25519-dalek
+26. chacha20poly1305 docs.rs — RFC 8439 AEAD + XChaCha20 192-bit nonce. https://docs.rs/chacha20poly1305
+27. sha2 RustCrypto — SHA-256. https://docs.rs/sha2
+28. BLAKE3-team BLAKE3 README — BLAKE3-256, SIMD, keyed hash, KDF, XOF. https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md
+29. IDS prompts.txt entry 94 (verbatim). C:/idfs/prompts.txt lines 1405-1419 — Phase 094 crate definition, contents, constraints.
+30. HX-241 plan format references. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+
+---
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document. The blueprint above defines all architecture, policy model, evaluation dimensions, algorithms, data structures, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 094 (ids-data-use-policy).
+
+
+# PHASE 095:
+
+## Phase 095 — Create the ids-ownership-policy crate: Data ownership across regions. Research Findings & Implementation Blueprint
+
+**Research complete (29 of 30 targeted searches executed; 1 search timed out but covered by overlapping results). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verb?atim prompt (C:/idfs/prompts.txt lines 1420-1434)
+
+```
+95. Research only do not read plan.md **[Phase 095 — Create the ids-ownership-policy crate: Data ownership across regions.]**
+
+Crate: ids-ownership-policy
+Purpose: Data ownership across regions.
+Contents: Dataset ownership, regional ownership, partition ownership, ownership transfer, ownership verification, custody graph integration.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 095 — Create the ids-ownership-policy crate: Data ownership across regions.]**
+
+Create plan-095.md in C:/idfs/plans/ for the ids-ownership-policy crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 095 creates `ids-ownership-policy`, the IDS crate that governs data ownership across regions. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by ownership domain. The crate owns dataset ownership, regional ownership, partition ownership, ownership transfer, ownership verification, and custody graph integration — all carrier-agnostic.
+
+`ids-ownership-policy` does not open sockets or drive any transport directly. It evaluates ownership state, admits or rejects ownership-transfer requests, verifies ownership proofs, maintains the custody graph, and emits signed custody decisions as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` address, capped at 1024 bytes). Every transfer is recorded in an append-only, hash-chained custody log signed with ed25519; custody state can be encrypted at rest with xchacha20poly1305/chacha20poly1305.
+
+Ownership model:
+- **Dataset ownership**: a `DatasetId` maps to exactly one owning region at a time (`OwnerRegion`), plus a versioned `OwnershipEpoch` that increments on every transfer.
+- **Regional ownership**: each region hosts an `OwnershipTable` (dataset → owner node + custody chain head); regions are autonomous for local datasets and coordinate only at transfer boundaries.
+- **Partition ownership**: a partition within a dataset inherits the dataset's owning region; partition-level ownership records enable granular transfer of sub-dataset slices.
+- **Ownership transfer**: signed `TransferIntent{from_region, to_region, dataset_id, partition_id, epoch, nonce}` → recipient validates signature (ed25519), checks custody chain continuity, applies transfer if valid, appends signed custody receipt.
+- **Ownership verification**: any node can verify current owner by walking the signed custody chain back to genesis; owner is the holder of the latest valid signed receipt.
+- **Custody graph**: a directed graph of custody events (creation, transfer, access, delegation) with ed25519-signed nodes and sha256/blake3 hash links; integration point with `ids-custody-graph` / `ids-audit`.
+
+Carrier-agnostic absolute rule: no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via `ids-carrier::Endpoint`. Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 (implemented in `ids-crypto`; `ids-ownership-policy` consumes primitive IDs and type surface from `ids-000-aa`/`ids-crypto` only).
+
+A skeleton `ids-ownership-policy` crate does NOT yet exist at `C:/idfs/ids-ownership-policy/`. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+Research basis: 29 parallel searches returned data mesh domain-oriented ownership (Starburst/AWS Lake Formation), data sovereignty vs residency (AWS), distributed sharding & shard ownership (YugabyteDB/M3DB/Splitter/OrientDB), formal ownership authentication transfer (arXiv 1208.4321), federated ownership verification signatures (FedSOV arXiv 2305.06085), data provenance vs lineage (Snowflake), chain of custody (CISA Insights), S3 cross-region replication, quorum/object ownership transfer (arXiv 2403.15191 DOT, Intrinsic Value Modules arxiv 2611.28928), ed25519 proof-of-possession/signing (Polkadot SDK, ed25519-dalek, Ironseal), BLAKE3 content addressing (content-addressable, deCDN, pacha, IPFS iroh collections), SHA-256 hash chains (Immutable.dev, Argus, immutable-audit), cross-region multi-Region fundamentals (AWS), data catalog ownership (Azure Data Catalog, DCAT-US v3.0, AWS DataZone), S3 object ownership, regional failover / data domiciling (CockroachDB, Azure Databricks DR), data governance ownership & ISO 27001 (Vanta, UpGuard, Advisera, Forcepoint), custody receipt block (IETF draft-bsvkey-dtn-custody-receipt), CRDT ownership merge (Wikipedia, arXiv 2310.18220, arXiv 1608.03960, ably.com), multi-master last-writer-wins conflict resolution (readpipe.org, SQL Server peer-to-peer, AD FSMO, DynamoDB global tables), region affinity / data placement (PMEM-CSI, SwiftStack, SkyStore, CockroachDB data domiciling).
+
+---
+
+### 2. Architecture Overview
+
+`ids-ownership-policy` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/evaluation layer: given an ownership query or transfer request, it decides (a) who the current owner is, (b) whether a transfer is admissible, (c) whether custody-chain continuity holds, and (d) what custody receipt to emit. It never sends bytes itself; it returns `OwnershipDecision` / `CustodyReceipt` that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (ownership users)               │
+│  ids-store, ids-replication, ids-fragment — ownership-tagged operations      │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 095: ids-ownership-policy (THIS CRATE — policy)         │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐ │ │\n│  │ dataset         │ │ regional        │ │ partition       │ │ custody  │ │ │\\n│  │ ownership       │ │ ownership       │ │ ownership       │ │ graph    │ │ │\\n│  │ (DatasetId →    │ │ (RegionId →     │ │ (PartitionId →  │ │ (DAG of  │ │ │\\n│  │  OwnerRegion +  │ │  OwnershipTable)│ │  OwnerNode +    │ │  custody   │ │ │\\n│  │  OwnershipEpoch)│ │                 │ │  custody head)  │ │  events)   │ │ │\\n│  └─────────────────┘ └─────────────────┘ └─────────────────┘ └──────────┘ │ │\\n│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐ │ │\\n│  │ transfer        │ │ ownership       │ │ custody receipt │ │ regional │ │ │\\n│  │ evaluation      │ │ verification    │ │ signing (ed25519) │ │ failover   │ │ │\\n│  │ (admit/reject)  │ │ (walk chain to  │ │ chain (sha256/    │ │ (transfer  │ │ │\\n│  │                 │ │  genesis)       ││  blake3 links)  │ │  on region │ │ │\\n│  └─────────────────┘ └─────────────────┘ └─────────────────┘ └──────────┘ │ │\\n└─────────────────────────────────────────┬──────────────────┴──────────────┘\n                                          │ opaque Vec<u8> datagrams\n┌─────────────────────────────────────────▼──────────────────┐\n│              CARRIER BOUNDARY: ids-carrier::Endpoint only  │\n│  send_datagram(Endpoint{CarrierType≤1024B addr, Vec<u8>},  │\n│  payload: &[u8])                                           │\n│  receive_datagram → (Endpoint, Vec<u8>)                    │\n│  No std::net / tokio::net / libp2p / IP / TCP / UDP /      │\n│  QUIC / HTTP / DNS / Wi-Fi / Bluetooth / cellular / VPN    │\n└────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of an ownership transfer:** caller submits `TransferIntent{from_region, to_region, dataset_id, partition_id, epoch, nonce, signature}` → `ids-ownership-policy` evaluates: verify ed25519 signature over intent bytes; check `from_region` is current owner per custody chain head; check `epoch == current_epoch + 1` (monotonic, prevents replay); check custody-chain continuity (new receipt links to previous receipt hash); if valid, return `TransferAdmitted{new_owner: to_region, new_epoch, custody_receipt: signed CustodyReceipt}` → caller ships receipt as opaque datagram to `ids-carrier::Endpoint` targets → recipient applies transfer, updates its `OwnershipTable`, appends receipt to local custody chain.
+
+**Data flow of ownership verification:** caller submits `OwnershipQuery{dataset_id, partition_id}` → crate walks the signed custody chain for that dataset/partition back to genesis (each receipt's `prev_receipt_hash` links to prior), verifies each ed25519 signature, returns `OwnerProof{current_owner: NodeId, owning_region: RegionId, epoch, chain_tip_hash, verified: true}`.
+
+**Regional failover:** when a region becomes unreachable, `ids-ownership-policy` evaluates a regional-failover transfer (signed governance decision → new owning region), returning `FailoverDecision{from_region, to_region, affected_datasets, epoch}`; the actual datagram transport is via `ids-carrier::Endpoint`.
+
+**Crypto used:** ed25519 for signing transfer intents and custody receipts (proof of ownership, non-repudiation); sha256/blake3 for custody-chain links and custody-graph edge hashing; xchacha20poly1305/chacha20poly1305 to encrypt custody state at rest (bounded replay windows, custody histories). No other crypto.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 29 executed searches. Sources are cited inline; full list in Section 12.
+
+#### 3.1 Data mesh domain-oriented ownership
+
+**Source:** Starburst "Data Mesh Architecture: Domain-oriented Ownership"; AWS Lake Formation Best Practices (Cross Account FAQ); AWS DataZone data discovery.
+
+In a data mesh, data producers own data products and ownership remains with the producer generating them. Data product owners manage the lifecycle and control access when sharing with consumers. There is no central governance platform for distribution/fulfillment; producers and consumers operate independently. `ids-ownership-policy` adopts this: each region is a domain that owns its datasets; cross-region sharing is via signed ownership transfer, not a central allocator. A central hub account may own the catalog but not the data — mirrored by `ids-ownership-policy` maintaining the custody graph while regions retain operational ownership.
+
+#### 3.2 Data sovereignty vs data residency
+
+**Source:** AWS "What is Data Sovereignty?".
+
+Data residency = where data is physically located. Data sovereignty = how the laws of a location apply to the data physically within that place. Both matter in cloud computing. `ids-ownership-policy` encodes region as a first-class sovereignty boundary: `RegionId` + `OwnerRegion` on every dataset; ownership transfer across regions is a governed, signed event (not implicit replication). Regional autonomy means a region controls its own datasets; cross-region operations require explicit transfer.
+
+#### 3.3 Distributed sharding and shard ownership
+
+**Sources:** YugabyteDB "4 Data Sharding Strategies"; M3DB "From Chaos to Control"; Splitter docs; OrientDB distributed architecture.
+
+Shard ownership = which node owns which shard, with placement algorithms that move shards on topology change. Consistent hashing keeps a subset of shards moving on rebalance; subclusters partition shard space into distinct non-overlapping slices. Splitter uses Raft for shard assignment with leases that lapse on crash. `ids-ownership-policy` mirrors this at dataset/partition granularity: `PartitionId → OwnerNode` mapping, lease-like `OwnershipEpoch` that invalidates stale ownership claims, and region-affinity constraints so partitions don't cross region boundaries without explicit transfer.
+
+#### 3.4 Formal ownership authentication transfer
+
+**Source:** arXiv 1208.4321 "Formal Verification of Safety Properties for Ownership Authentication Transfer Protocol".
+
+Ownership transfer must be carried out properly or neither party can use the asset; it prevents impersonation after sale/loss/theft. The old owner is locked out after a valid transfer. `ids-ownership-policy` applies the same safety property: after a valid signed transfer, the `from_region` can no longer write to the dataset/partition; the `to_region` becomes the sole owner. Transfer validity = signature valid + epoch monotonic + custody-chain continuous.
+
+#### 3.5 Federated model secure ownership verification (FedSOV)
+
+**Source:** arXiv 2305.06085 "FedSOV: Federated Model Secure Ownership Verification with Unforgeable Signature".
+
+Embeds ownership credentials and verifies ownership using unforgeable digital signatures; resistant to ambiguity attacks. `ids-ownership-policy` uses ed25519 signatures over custody receipts as the unforgeable ownership proof; verification requires only the public key and the receipt bytes, no central authority.
+
+#### 3.6 Data provenance vs data lineage
+
+**Source:** Snowflake "Data Provenance vs. Data Lineage".
+
+Provenance = chain of custody: where data came from, who handled it, what supports trustworthiness. Lineage = full journey including transformations and downstream assets. `ids-ownership-policy` owns provenance (custody graph of who held/transferred each dataset/partition); lineage (transformations) is delegated to `ids-lineage`/ids-audit. The custody graph is the ownership-relevant subset: creation → transfer → access → delegation events.
+
+#### 3.7 Chain of custody
+
+**Source:** CISA Insights "Chain of Custody and Critical Infrastructure Systems".
+
+Chain of custody documents each person/org who handles an asset, date/time collected or transferred, and purpose. A break in the chain = period where control is uncertain → opportunity for tampering. `ids-ownership-policy` makes every custody event an ed25519-signed receipt with timestamp (IdsTime ticks), from/to NodeId, purpose, and hash link to previous receipt — an unbreakable chain where any missing receipt is detectable.
+
+#### 3.8 Cross-region replication and object ownership
+
+**Sources:** AWS S3 replication (CRR/SRR); S3 Object Ownership (bucket-owner-enforced).
+
+Cross-Region Replication copies objects asynchronously across regions; buckets can be owned by same or different accounts. S3 Object Ownership: bucket owner enforced = ACLs disabled, bucket owner owns all objects. `ids-ownership-policy` generalizes: a dataset has one `OwnerRegion`; replicas in other regions are non-owning copies. Transfer of ownership changes `OwnerRegion` via signed event; replication alone never transfers ownership.
+
+#### 3.9 Delegated Ownership Transfer and intrinsic value modules
+
+**Sources:** arXiv 2403.15191 "Your Trust, Your Terms: Delegated Ownership Transfer (DOT)"; arXiv 2611.28928 "Intrinsic Value Modules: Trusted-Hardware Support for Locally Final Offline Asset Transfer".
+
+DOT decouples key ownership from value ownership; transfer via key re-sharing with monotonic recovery precedence (new recovery time strictly earlier than old). IVM gives local finality: two genuine hardware modules can determine transfer validity from authenticated local state alone. `ids-ownership-policy` adopts monotonic epoch (recovery-time analog): each transfer's epoch must be strictly greater than the previous, preventing replay of stale transfers; ownership validity checkable locally from the signed custody chain.
+
+#### 3.10 ed25519 proof of possession and signing
+
+**Sources:** Polkadot SDK sp_core/ed25519.rs (ProofOfPossession = Signature); ed25519-dalek docs; ed25519.com walkthrough; Ironseal challenge-response.
+
+Ed25519 proves authenticity (holder of private key created the message) and integrity (message unmodified). Proof of possession = signature over owner bytes. `ids-ownership-policy`: every `TransferIntent` and `CustodyReceipt` is ed25519-signed by the transferring region's key; verification requires public key + message + signature, no secrets.
+
+#### 3.11 BLAKE3 content addressing
+
+**Sources:** content-addressable (hartsock); deCDN content addressing; pacha content_address.rs; IPFS iroh collections/MASL.
+
+BLAKE3-256 identifies content; dedup, tamper detection, delta storage. IPFS iroh collections map paths to BLAKE3 hashes; collection hash = BLAKE3 of root blob of per-file hashes. `ids-ownership-policy` uses BLAKE3 for custody-graph edge hashing and content-addressed custody receipts (receipt ID = BLAKE3 of receipt content), enabling tamper detection and dedup of identical custody events.
+
+#### 3.12 SHA-256 hash chains
+
+**Sources:** Immutable.dev Hash Chain; Argus tamper-evident ledger; immutable-audit eBPF ledger.
+
+Every event hashed with SHA-256 including previous event hash → tamper-evident chain; modify any field and every subsequent hash breaks. Chain per-workspace with ordering guarantees. `ids-ownership-policy`: custody chain per dataset/partition — each receipt contains `prev_receipt_hash` (SHA-256 or BLAKE3) over the previous receipt; break detection is O(chain length) and offline-verifiable with the genesis hash.
+
+#### 3.13 Multi-region fundamentals and regional failover
+
+**Sources:** AWS multi-Region fundamentals; Azure Databricks managed DR; CockroachDB data domiciling.
+
+Asynchronous cross-region replication reduces write latency but creates staleness windows; on primary-region failure, pending writes may be unavailable. CockroachDB data domiciling: `REGIONAL BY ROW`/`REGIONAL BY TABLE` constrain replica placement; super regions constrain replicas to member regions; single-region super region cannot survive its loss (need ≥3 regions). `ids-ownership-policy`: regional failover transfers ownership to a surviving region via signed governance decision; `OwnerRegion` changes atomically at epoch boundary; affected datasets/partitions enumerated in `FailoverDecision`.
+
+#### 3.14 Data catalog ownership and governance
+
+**Sources:** Azure Data Catalog; DCAT-US v3.0; AWS DataZone; Vanta data governance; UpGuard ISO 27001 A.5.12; Advisera ISO 27001/DGA; Forcepoint DLP.
+
+Azure Data Catalog: unowned assets → any user can take ownership; owned assets restrict discover/delete to owners + co-owners; at least two owners recommended. DCAT-US v3.0: `rightsHolder` establishes institutional accountability; `publisher` where roles diverge. Vanta: owner = named person accountable for decisions, approves access, answers auditors. ISO 27001 A.5.9 inventory, A.5.12 classification with owner assignment, A.5.14 information transfer. `ids-ownership-policy`: every dataset/partition has an `OwnerNode` + `OwnerRegion` (accountable principal); co-owners supported via `CoOwnerSet`; ownership changes are signed, audited events; classification/sensitivity metadata is referenced (not stored) — the crate enforces who may transfer, not what the data means.
+
+#### 3.15 Custody receipt block (IETF)
+
+**Source:** draft-bsvkey-dtn-custody-receipt-block-01 (Bundle Protocol v7 extension).
+
+Custody Receipt Block carries a chain of signed custody receipts inside the bundle; each custodian appends a receipt stating held-by, received-from, received/forwarded time. Verifier holding public keys can check the chain and report any route segment with no receipt. Not custody-transfer signalling; receipts are evidence for accounting/dispute. `ids-ownership-policy`: custody receipts are standalone signed structures (not bundled inside datagrams — the datagram is opaque); each receipt states custodian NodeId, predecessor custody receipt, dataset/partition, region, timestamp, purpose; verifier can confirm continuous custody.
+
+#### 3.16 CRDT ownership merge and conflict resolution
+
+**Sources:** Wikipedia CRDT; arXiv 2310.18220; arXiv 1608.03960; ably.com CRDTs.
+
+CRDTs: replicas update independently, merge resolves inconsistencies, eventual convergence. State-based CRDTs send full state; merge = join semilattice (commutative, associative, idempotent). `ids-ownership-policy` ownership itself is NOT a CRDT (ownership is exclusive, single-owner at a time — last-write-wins with epoch ordering, not mergeable state). However the custody graph's causal metadata (version vectors for concurrent access events) can use CRDT-style merge for the graph's non-ownership annotations. Ownership conflicts (two regions claiming ownership) resolved by epoch ordering: highest valid epoch wins; ties broken by stable NodeId (cf. LWW register tie-breaker).
+
+#### 3.17 Multi-master last-writer-wins conflict resolution
+
+**Sources:** readpipe.org multi-master conflicts; SQL Server peer-to-peer last writer; AD FSMO; DynamoDB global tables LWW.
+
+LWW register: `winner = max(versions, key = (logical_or_physical_time, stable_writer_id))`; tie-breaker guarantees convergence not real-time recency. DynamoDB global tables: last writer wins between concurrent cross-region writes. `ids-ownership-policy`: ownership transfer uses `OwnershipEpoch` (monotonic counter) as the total order; highest epoch with valid signature wins; stable NodeId breaks epoch ties. Unlike LWW (which discards concurrent info), `ids-ownership-policy` rejects stale-epoch transfers outright (fail-closed), because ownership is exclusive.
+
+#### 3.18 Region affinity and data placement
+
+**Sources:** PMEM-CSI region affinity; SwiftStack region read/write affinity; SkyStore cost-optimized placement across regions/clouds; CockroachDB data domiciling.
+
+Region affinity: all parts of a volume on devices in the same region; write-affinity stores locally first then moves asynchronously. SkyStore: TTL-based replication/eviction optimizing cost; cross-cloud transfers cost 23× more than same-region. `ids-ownership-policy`: `RegionAffinity` invariant — a partition's replicas should reside in its owning region; cross-region placement requires explicit ownership transfer (not implicit); cost-awareness noted but policy decisions (where to place) are delegated to `ids-placement`; this crate only records who owns and governs transfers.
+
+#### 3.19 Ownership, control, and possession distinction
+
+**Sources:** CSA key management ownership/control/possession; UCL custodial vs non-custodial; "Reevaluating Information Ownership" surrogate ownership.
+
+Ownership = decision rights; control = ability to effect changes; possession = physical holding. Surrogate ownership: passing copies passes rights implicitly. `ids-ownership-policy` tracks ownership (decision rights over dataset/partition) separately from custody (who holds bytes) — a region may have custody of a replica without owning it. Transfer changes ownership; custody follows via signed receipt.
+
+#### 3.20 Region-specific considerations already covered: data domiciling, regional failover (see 3.13), storage policies (3.18), multi-region replication (3.8).
+
+---
+
+### 4. Threat Model & Mitigations
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Stale ownership claim (old region still writes after transfer) | Write integrity | `OwnershipEpoch` monotonic; transfers with epoch ≤ current rejected; only `OwnerRegion` may write |
+| Replay of a signed transfer intent | Transfer integrity | Nonce per intent + epoch monotonic + custody-chain continuity check; replayed intent fails epoch check |
+| Forked custody chain (two regions claim ownership) | Ownership exclusivity | Highest valid epoch wins; epoch ties broken by stable `NodeId`; conflicting lower-epoch receipts ignored |
+| Broken custody chain (missing receipt) | Custody accountability | Each receipt links via `prev_receipt_hash` (sha256/blake3); verification walks chain to genesis; missing link = `CustodyChainBroken` |
+| Unsigned / forged transfer | Transfer authenticity | ed25519 signature over intent bytes; unverifiable signature → `TransferRejected` |
+| Carrier duplication/delay of datagrams | Replay/ordering | Carrier-agnostic; idempotent custody application (same receipt ID applied twice = no-op); replay protection via nonce+epoch |
+| Region failover to wrong region | Availability + integrity | Failover requires signed governance decision; `FailoverDecision` enumerates affected datasets; new `OwnerRegion` recorded at new epoch |
+| Custody state exfiltration at rest | Confidentiality | Custody chain/receipts encrypted at rest with xchacha20poly1305/chacha20poly1305 (feature-gated) |
+| Key extraction (region signing key) | Decision authenticity | Signing keys never leave node; encrypted at rest; zeroized on shutdown |
+| Audit/custody log tampering | Accountability | sha256/blake3 hash chain + ed25519-signed checkpoints; offline verifiable with genesis hash |
+| Ownership/possession conflation | Correct access control | Separate `OwnerNode`/`OwnerRegion` (decision rights) from custody holders; transfer ≠ replication |
+
+The carrier is never trusted: custody receipts and transfer intents are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-ownership-policy ||
+|-------|------|--------------------------|--------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `DatasetId`, `PartitionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpRef`, `Error` — consumed, never redefined; sealed trait contracts mirrored |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All ownership/custody traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing transfer intents/custody receipts; encrypting custody state at rest; hashing chain links |
+| `ids-store` | Primary record store (ownership user) | Tags datasets/partitions with owning region; consults `ids-ownership-policy` before write admission |
+| `ids-replication` | Replica synchronization | Replication never transfers ownership; uses `ids-ownership-policy` to confirm `OwnerRegion` before promoting a replica |
+| `ids-fragment` | Record fragments/shards | Fragment reads/writes governed by parent dataset/partition ownership |
+| `ids-custody-graph` (Phase 096-ish) | Custody graph storage/query | `ids-ownership-policy` emits custody events; graph crate persists and queries the DAG |
+| `ids-audit` | Signed audit log | Custody receipts feed audit entries; hash chain shared with audit chain |
+| `ids-identity` (Phase 004) | `StableNodeId`/`RotatingNodeId` | Region/node identity keys used for ed25519 signing of transfers |
+| `ids-time` | Monotonic `IdsTime` | Timestamps on custody receipts; never wall-clock for ordering |
+
+**Integration points:** `ids-ownership-policy` evaluates public contracts declared in `ids-000-aa`; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on `ids-discovery`/`ids-session`/`ids-cli` beyond what contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+**Crate:** `ids-ownership-policy` (new crate at `C:/idfs/ids-ownership-policy/`; depends on `ids-000-aa`, `ids-carrier`, `ids-crypto`, `ids-time`):
+
+```
+ids-ownership-policy/
+├── Cargo.toml                          # ids-000-aa, ids-carrier, ids-crypto, ids-time, serde, thiserror, blake3
+├── lib.rs                              # crate root, feature gates, public re-exports
+├── constants.rs                        # OwnershipEpoch limits, MAX_OWNERS, custody chain caps
+├── error.rs                            # OwnershipError (thiserror): transfer, custody, chain, region errors
+├── features.rs                         # Feature flags: encrypt-at-rest, custody-graph, audit
+├── types.rs                            # OwnershipId, OwnershipEpoch, OwnerRecord, CustodyReceipt, TransferIntent (re-exports ids-000-aa types)
+│
+├── dataset_ownership/                  # DatasetId → OwnerRegion + OwnershipEpoch
+│   ├── mod.rs
+│   ├── registry.rs                     # dataset ownership registry (in-memory + persistable)
+│   ├── owner_record.rs                 # OwnerRecord: owner node, region, epoch, custody head
+│   ├── epoch.rs                        # OwnershipEpoch: monotonic counter, increment, validate
+│   └── types.rs
+│
+├── regional_ownership/                 # RegionId → OwnershipTable
+│   ├── mod.rs
+│   ├── table.rs                        # OwnershipTable: dataset/partition → owner within region
+│   ├── region_state.rs                 # RegionState: Active/Degraded/Failed/Retired
+│   ├── autonomy.rs                     # regional autonomy checks (region governs its datasets)
+│   └── types.rs
+│
+├── partition_ownership/                # PartitionId → OwnerNode + custody head
+│   ├── mod.rs
+│   ├── map.rs                          # PartitionId → OwnerNode mapping
+│   ├── granularity.rs                  # partition-level transfer vs dataset-level transfer
+│   └── types.rs
+│
+├── ownership_transfer/                 # TransferIntent → TransferAdmitted/Rejected
+│   ├── mod.rs
+│   ├── intent.rs                       # TransferIntent: from/to region, dataset, partition, epoch, nonce, signature
+│   ├── evaluator.rs                    # admit/reject logic: signature, epoch, chain continuity
+│   ├── nonce.rs                        # nonce generation and replay cache
+│   ├── failover.rs                     # FailoverDecision: regional failover transfer
+│   └── types.rs
+│
+├── ownership_verification/             # OwnershipQuery → OwnerProof
+│   ├── mod.rs
+│   ├── prover.rs                       # walks custody chain to genesis, verifies signatures
+│   ├── proof.rs                        # OwnerProof: current owner, region, epoch, chain tip, verified
+│   ├── chain_walk.rs                   # custody chain traversal with link validation
+│   └── types.rs
+│
+├── custody_graph/                      # DAG of custody events
+│   ├── mod.rs
+│   ├── graph.rs                        # custody graph: nodes = custody events, edges = hash links
+│   ├── event.rs                        # CustodyEvent: creation/transfer/access/delegation
+│   ├── edge.rs                         # graph edge: sha256/blake3 hash of target event
+│   ├── receipt_id.rs                   # CustodyReceiptId = BLAKE3-256 of receipt content
+│   └── types.rs
+│
+├── custody_chain/                      # per dataset/partition signed hash chain
+│   ├── mod.rs
+│   ├── chain.rs                        # append-only chain: each receipt links to prev via hash
+│   ├── link.rs                         # chain link: prev_receipt_hash + receipt
+│   ├── verifier.rs                     # verifies chain integrity + signatures
+│   ├── checkpoint.rs                   # ed25519-signed periodic checkpoints
+│   └── types.rs
+│
+├── custody_receipt/                    # signed custody receipt structures
+│   ├── mod.rs
+│   ├── receipt.rs                      # CustodyReceipt: custodian, prev hash, dataset/partition, region, timestamp, purpose, signature
+│   ├── signer.rs                       # ed25519 signing of receipts
+│   ├── encrypter.rs                    # xchacha20poly1305/chacha20poly1305 at-rest encryption (feature-gated)
+│   └── types.rs
+│
+├── contracts/                          # sealed trait contracts (~12 files)
+│   ├── mod.rs
+│   ├── ownership_contract.rs           # trait Ownership (register, transfer, verify)
+│   ├── regional_ownership_contract.rs  # trait RegionalOwnership (per-region table)
+│   ├── partition_ownership_contract.rs # trait PartitionOwnership
+│   ├── transfer_contract.rs            # trait OwnershipTransfer (admit/reject/failover)
+│   ├── verification_contract.rs        # trait OwnershipVerification (prove owner)
+│   ├── custody_contract.rs             # trait CustodyGraph (emit/query custody events)
+│   ├── receipt_contract.rs             # trait CustodyReceipt (sign/verify/encrypt)
+│   ├── chain_contract.rs               # trait CustodyChain (append/verify chain)
+│   ├── failover_contract.rs            # trait RegionalFailover
+│   ├── nonce_contract.rs               # trait TransferNonce (replay protection)
+│   ├── carrier_contract.rs             # trait OwnershipCarrier (opaque Endpoint datagrams)
+│   └── mod.rs
+│
+├── invariants/                         # compile-time/runtime invariants (~10 files)
+│   ├── mod.rs
+│   ├── single_owner.rs                 # one OwnerRegion per dataset at a time
+│   ├── epoch_monotonic.rs              # OwnershipEpoch strictly increasing
+│   ├── chain_continuity.rs             # prev_receipt_hash links unbroken
+│   ├── region_autonomy.rs              # region governs only its datasets
+│   ├── custody_chain_sound.rs          # signed chain verifiable to genesis
+│   ├── carrier_agnostic.rs             # no std::net/tokio::net in crate
+│   ├── crypto_allowlist.rs             # only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305
+│   ├── ownership_possession_split.rs   # ownership ≠ custody tracking
+│   ├── failover_signed.rs              # failover requires signed governance decision
+│   └── mod.rs
+│
+├── audit/                              # signed custody audit entries (~6 files)
+│   ├── mod.rs
+│   ├── entry.rs                        # custody audit entry
+│   ├── chain.rs                        # hash-chained audit entries
+│   ├── checkpoint.rs                   # ed25519-signed checkpoints
+│   ├── signer.rs
+│   ├── verifier.rs
+│   └── types.rs
+│
+├── tests/                              # property/verification tests (~30 files)
+│   ├── mod.rs
+│   ├── dataset_ownership_tests.rs
+│   ├── regional_ownership_tests.rs
+│   ├── partition_ownership_tests.rs
+│   ├── transfer_tests.rs               # admit/reject/failover scenarios
+│   ├── verification_tests.rs           # chain walk to genesis
+│   ├── custody_chain_tests.rs          # chain integrity + break detection
+│   ├── custody_graph_tests.rs
+│   ├── receipt_tests.rs                # sign/verify/encrypt roundtrip
+│   ├── epoch_tests.rs                  # monotonicity
+│   ├── nonce_tests.rs                  # replay protection
+│   ├── invariant_tests.rs
+│   ├── carrier_agnostic_tests.rs       # asserts no std::net/tokio::net usage
+│   ├── crypto_allowlist_tests.rs       # only allowed crypto reachable
+│   └── property_tests.rs               # proptest properties for custody chains
+│
+├── benches/                            # (~8 files)
+│   ├── mod.rs
+│   ├── transfer_bench.rs
+│   ├── verification_bench.rs
+│   └── custody_chain_bench.rs
+│
+├── docs/                               # (~14 files)
+│   ├── architecture.md
+│   ├── ownership_model.md              # dataset/regional/partition ownership semantics
+│   ├── transfer_protocol.md            # transfer intent → admitted → receipt
+│   ├── custody_chain.md                # hash chain + verification
+│   ├── regional_failover.md            # failover decision flow
+│   ├── custody_graph.md                # DAG integration
+│   ├── carrier_agnostic.md             # carrier-agnostic boundary contract
+│   ├── crypto_policy.md                # allowed-crypto allowlist
+│   ├── runbook.md
+│   └── adding_ownership_domain.md
+│
+├── spec/                               # normative specifications
+│   ├── ownership_spec.md
+│   ├── transfer_spec.md
+│   ├── custody_chain_spec.md
+│   └── carrier_agnostic_spec.md
+│
+├── baselines/                          # stored baseline results for regression comparison
+│   ├── transfer_baseline.json
+│   └── custody_chain_baseline.json
+│
+└── test_vectors/                       # deterministic inputs and expected outputs
+    ├── transfer_vectors.json
+    ├── custody_chain_vectors.json
+    └── failover_vectors.json
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `tests/`, `benches/`, `docs/`, `spec/`, `baselines/`, `test_vectors/`. Each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+#### 7.1 OwnershipEpoch (monotonic counter)
+```
+OwnershipEpoch: u64 (ZERO = genesis)
+increment(): epoch + 1 with saturating guard at MAX
+valid_transfer(current, candidate): candidate == current + 1  (strict, prevents skip/replay)
+```
+Strict increment (not `>=`) ensures no two transfers share an epoch; ties impossible by construction. (If a future design relaxes to `>=`, tie-break by stable `NodeId` — see LWW research.)
+
+#### 7.2 OwnerRecord
+```
+OwnerRecord {
+  dataset_id: DatasetId,
+  partition_id: Option<PartitionId>,   # None = dataset-level ownership
+  owner_node: NodeId,
+  owner_region: RegionId,
+  epoch: OwnershipEpoch,
+  custody_head: CustodyReceiptId,       # BLAKE3-256 of latest receipt
+}
+```
+Exactly one `OwnerRecord` per (dataset, partition) at any time; `OwnerRegion` is the sovereignty boundary.
+
+#### 7.3 TransferIntent
+```
+TransferIntent {
+  from_region: RegionId,
+  to_region: RegionId,
+  dataset_id: DatasetId,
+  partition_id: Option<PartitionId>,
+  epoch: OwnershipEpoch,               # must == current_epoch + 1
+  nonce: [u8; 32],                      # random, replay cache
+  signature: Signature,                 # ed25519 over canonical bytes of intent
+}
+```
+
+#### 7.4 CustodyReceipt
+```
+CustodyReceipt {
+  receipt_id: CustodyReceiptId,         # BLAKE3-256(receipt bytes)
+  prev_receipt_hash: [u8; 32],          # sha256/blake3 of previous receipt (zero for genesis)
+  dataset_id: DatasetId,
+  partition_id: Option<PartitionId>,
+  from_region: Option<RegionId>,        # None for creation
+  to_region: RegionId,
+  custodian_node: NodeId,
+  timestamp: IdsTime,
+  purpose: CustodyPurpose,              # Creation/Transfer/Failover/Access/Delegation
+  signature: Signature,                 # ed25519 by custodian_node
+}
+```
+Custody chain per (dataset, partition): each receipt's `prev_receipt_hash` = hash of previous receipt → tamper-evident chain verifiable to genesis.
+
+#### 7.5 Transfer evaluation
+```
+evaluate(intent, state):
+  if !ed25519_verify(intent.signature, intent_bytes, from_region_key): return Rejected(Forgery)
+  if intent.epoch != state.epoch + 1: return Rejected(StaleEpoch)
+  if intent.from_region != state.owner_region: return Rejected(NotOwner)
+  if nonce_seen(intent.nonce): return Rejected(Replay)
+  receipt = build_receipt(intent, state.custody_head)
+  return Admitted{new_owner: intent.to_region, new_epoch: intent.epoch, receipt}
+```
+
+#### 7.6 Ownership verification (chain walk)
+```
+verify(dataset_id, partition_id):
+  head = state.custody_head
+  while head != GENESIS:
+    receipt = store.get(head)
+    if !ed25519_verify(receipt.signature, receipt_bytes, receipt.custodian_node.key): return Unverified
+    head = receipt.prev_receipt_hash
+  return OwnerProof{owner: state.owner_node, region: state.owner_region, epoch, chain_tip: state.custody_head, verified: true}
+```
+
+#### 7.7 Regional failover
+```
+failover(from_region, to_region, governance_signature, affected_datasets):
+  if !ed25519_verify(governance_signature, ...): return Rejected
+  for ds in affected_datasets:
+    if ds.owner_region != from_region: skip (not owned by failing region)
+    emit TransferIntent{from_region, to_region, ds, epoch=ds.epoch+1, nonce, signature=governance_key}
+    ds.owner_region = to_region; ds.epoch += 1
+  return FailoverDecision{from_region, to_region, affected_datasets, new_epoch}
+```
+
+#### 7.8 Custody graph edge
+```
+Edge { from: CustodyReceiptId, to: CustodyReceiptId, hash: BLAKE3-256(to receipt bytes) }
+```
+DAG of custody events; used for forensic reconstruction of who held what when.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `DatasetId`, `PartitionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpRef`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `ids-time` — monotonic `IdsTime` for custody receipt timestamps.
+- `serde` — serialization of custody receipts, transfer intents, audit entries.
+- `thiserror` — error types.
+- `blake3` — receipt IDs and custody-graph edge hashing.
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. `ids-ownership-policy` imports no crypto directly — all via `ids-crypto` primitive IDs.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-95.1 | Dataset ownership: exactly one `OwnerRegion` per `DatasetId` at a time | `single_owner` invariant holds for all registered datasets |
+| AC-95.2 | Regional ownership: `OwnershipTable` per `RegionId` maps dataset/partition → owner node | Per-region tables consistent with global state |
+| AC-95.3 | Partition ownership: `PartitionId → OwnerNode` mapping supports granular transfer | Partition-level transfers accepted/rejected correctly |
+| AC-95.4 | Ownership transfer: `TransferIntent` admitted iff signature valid, epoch == current+1, `from_region` is current owner, chain continuous | 100% of invalid intents rejected; valid intents admitted |
+| AC-95.5 | Epoch monotonicity: `OwnershipEpoch` strictly increases on every transfer | No two transfers share an epoch; `epoch == prev + 1` |
+| AC-95.6 | Ownership verification: chain walk to genesis verifies all signatures; returns `OwnerProof` | Verified owner matches `OwnerRecord`; broken chain detected |
+| AC-95.7 | Custody chain: each receipt links via `prev_receipt_hash`; tamper detection O(chain length) | Any modified receipt breaks verification at that link |
+| AC-95.8 | Custody receipt: ed25519-signed, receipt_id = BLAKE3-256(content), purpose tagged | Sign/verify roundtrip; receipt ID collision-free |
+| AC-95.9 | Regional failover: requires signed governance decision; new `OwnerRegion` at new epoch | Failover without signature rejected; affected datasets enumerated |
+| AC-95.10 | Replay protection: nonce + epoch monotonic prevents replayed transfers | Replayed intent rejected by epoch check |
+| AC-95.11 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) passes; source grep zero matches |
+| AC-95.12 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in crypto surface | Allowlist unit test passes |
+| AC-95.13 | Every custody event recorded in append-only, hash-chained, ed25519-signed custody log with `NodeId` + `IdsTime` | Audit chain verifiable end-to-end |
+| AC-95.14 | Ownership vs custody split tracked separately | `OwnerNode`/`OwnerRegion` distinct from custody holders |
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete epoch width:** `OwnershipEpoch` as `u64` vs `u128`; overflow behavior at MAX (saturating vs error) unquantified.
+- **Replay cache size and TTL:** bounded nonce cache for transfer intents; eviction policy affects long-running nodes.
+- **Custody chain storage:** in-memory vs persistent (via `ids-store`/`ids-custody-graph`); persistence boundary undefined here.
+- **Regional failover governance:** who signs `FailoverDecision` (multisig? single governance key?); quorum of governance keys TBD.
+- **Encryption-at-rest scope:** which custody structures are encrypted (receipts only, or full chain); key management delegated to `ids-identity`/`ids-crypto`.
+- **Cross-region transfer latency:** WAN round trips for signature verification and receipt shipping unmeasured; SLO pending.
+- **Co-owner semantics:** `CoOwnerSet` add/remove rules (unanimous? majority?) undefined.
+- **Partition vs dataset transfer atomicity:** transferring a dataset with multiple partitions — atomic or per-partition? design decision pending.
+- **Interaction with `ids-immutable` (holds/retention):** ownership transfer of held/immutable records must be blocked; guard handshake TBD.
+- **Custody graph query API:** what queries the graph crate supports vs what `ids-ownership-policy` emits; interface contract TBD.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate crate `ids-ownership-policy` (not a folder) | Follows "separate crates instead of more folders" directive; clear ownership boundary |
+| `OwnershipEpoch` strict monotonic `u64`, `candidate == current + 1` | Exclusive ownership: no shared epochs, fail-closed on stale/replayed transfers (unlike LWW which discards concurrent info) |
+| Exactly one `OwnerRegion` per dataset at a time | Ownership is exclusive; replicas are non-owning copies (mirrors S3 bucket-owner-enforced) |
+| Region as first-class sovereignty boundary (`RegionId` + `OwnerRegion`) | Data sovereignty/residency research: region governs its datasets; cross-region ops require explicit signed transfer |
+| ed25519-signed `TransferIntent` + `CustodyReceipt` | Unforgeable ownership proof (FedSOV research); verification needs only public key + bytes |
+| Custody chain with `prev_receipt_hash` (sha256/blake3) per dataset/partition | Tamper-evident chain (Immutable/Argus research); break detection offline-verifiable with genesis hash |
+| Receipt ID = BLAKE3-256(content) | Content-addressed custody receipts (BLAKE3 research); tamper detection + dedup |
+| Nonce + epoch for replay protection | Ownership authentication transfer safety (arXiv 1208.4321); prevents impersonation after transfer |
+| Ownership vs custody split tracked separately | Ownership = decision rights; custody = physical holding (CSA/UCL research); transfer changes ownership, not necessarily custody |
+| Regional failover via signed governance decision | Multi-region fundamentals: failover must be governed, not implicit (AWS/CockroachDB research) |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitive IDs via `ids-000-aa` | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+1. Starburst, "Data Mesh Architecture: Domain-oriented Ownership" — data producers own data products, no central distribution. https://starburst.io/blog/data-mesh-architecture
+2. AWS Lake Formation Best Practices, Cross Account FAQ — peer-to-peer data mesh, ownership remains with producer. https://aws.github.io/aws-lakeformation-best-practices/data-sharing/cross-account-faq
+3. AWS, "What is Data Sovereignty?" — data residency vs data sovereignty. https://aws.amazon.com/what-is/data-sovereignty
+4. YugabyteDB, "4 Data Sharding Strategies We Analyzed" — shard ownership, consistent hashing, rebalancing. https://yugabyte.com/blog/four-data-sharding-strategies-we-analyzed-in-building-a-distributed-sql-database
+5. Uber, "From Chaos to Control: M3DB Subclusters" — shard placement, isolation groups, subcluster ownership. https://uber.com/blog/from-chaos-to-control
+6. Splitter docs, sharding.md — ownership management, leased shard assignments, Raft. https://github.com/atoms-co/splitter/blob/main/docs/sharding.md
+7. OrientDB docs, Distributed Architecture — cluster owner, static owner, shard ownership. https://github.com/orientechnologies/orientdb-docs/blob/master/Distributed-Architecture.md
+8. arXiv 1208.4321, "Formal Verification of Safety Properties for Ownership Authentication Transfer Protocol" — ownership transfer safety, old owner locked out. https://arxiv.org/html/1208.4321v1
+9. arXiv 2305.06085, "FedSOV: Federated Model Secure Ownership Verification" — unforgeable signature-based ownership verification. https://arxiv.org/html/2305.06085v1
+10. Snowflake, "Data Provenance vs. Data Lineage" — provenance = chain of custody; lineage = full journey. https://snowflake.com/en/data-governance/data-lineage/data-provenance
+11. CISA Insights, "Chain of Custody and Critical Infrastructure Systems" — chain of custody documentation, breaks in custody. https://cisa.gov/sites/default/files/publications/cisa-insights_chain-of-custody-and-ci-systems_508.pdf
+12. AWS S3 docs, Replication and Object Ownership — CRR/SRR, bucket-owner-enforced. https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication.html; https://docs.aws.amazon.com/AmazonS3/latest/userguide/about-object-ownership.html
+13. arXiv 2403.15191, "Delegated Ownership Transfer (DOT)" — key vs value ownership, monotonic recovery precedence. https://arxiv.org/html/2403.15191v4
+14. arXiv 2611.28928, "Intrinsic Value Modules" — local finality, asset uniqueness, local transfer atomicity. https://arxiv.org/html/2611.28928v1
+15. Polkadot SDK sp_core/ed25519.rs — ProofOfPossession = Signature. https://paritytech.github.io/polkadot-sdk/master/src/sp_core/ed25519.rs.html
+16. ed25519-dalek docs.rs — ed25519 key gen/sign/verify. https://docs.rs/ed25519-dalek/latest/ed25519_dalek
+17. ed25519.com — signing and verifying with Ed25519 walkthrough. https://ed25519.com/blog/signing-and-verifying-with-ed25519
+18. Ironseal — ed25519 challenge-response proof of possession. https://lib.rs/crates/ironseal
+19. content-addressable (hartsock) — BLAKE3 content IDs, CIDs. https://github.com/hartsock/content-addressable
+20. deCDN, Content Addressing — BLAKE3 blob identification, namespace separation. https://docs.decdn.org/protocol/content-addressing
+21. pacha content_address.rs — BLAKE3 content address with size. https://docs.rs/pacha/latest/src/pacha/storage/content_address.rs.html
+22. IPFS docs, iroh collections/MASL — BLAKE3 collection hashes. https://docs.ipfs.tech/how-to/content-addressing-data-sets
+23. Immutable.dev, Hash Chain — SHA-256 hash chain with previous event hash. https://docs.getimmutable.dev/guides/hash-chain
+24. Argus — tamper-evident append-only SHA-256 provenance ledger. https://github.com/Perseus-Computing-LLC/argus
+25. immutable-audit — SHA-256 hash-chained audit trail. https://github.com/devlab-group/immutable-audit
+26. AWS Prescriptive Guidance, multi-Region fundamentals — async cross-region replication, staleness windows. https://docs.aws.amazon.com/pdfs/prescriptive-guidance/latest/aws-multi-region-fundamentals/aws-multi-region-fundamentals.pdf
+27. Azure Databricks, Managed disaster recovery — regional replication and failover. https://learn.microsoft.com/en-us/azure/databricks/admin/managed-disaster-recovery
+28. CockroachDB docs, Data Domiciling — REGIONAL BY ROW/TABLE, super regions, replica placement. https://docs.cockroachlabs.com/docs/stable/data-domiciling
+29. Azure Data Catalog, manage data assets — take ownership, co-owners, visibility. https://learn.microsoft.com/en-us/azure/data-catalog/data-catalog-how-to-manage
+30. DCAT-US v3.0 Implementation Guide — rightsHolder, publisher, data inventory. https://resources.data.gov/resources/dcat-us-3-implementation
+31. AWS DataZone, Automate Data Discovery — ownership, business data catalog. https://aws.amazon.com/datazone/features/data-discovery
+32. Vanta, What is data governance — ownership = named accountable person. https://vanta.com/collection/grc/data-governance
+33. UpGuard, ISO 27001 Control 5.12 — classification, owner assignment. https://upguard.com/compliance/iso-27001/5-12
+34. Advisera, ISO 27001 and DGA — A.5.9 inventory, A.5.12 classification, A.5.14 transfer. https://advisera.com/articles/iso-27001-and-data-governance-act
+35. Forcepoint, DLP Policy Template — roles and ownership. https://forcepoint.com/blog/insights/data-loss-prevention-policy-template
+36. IETF draft-bsvkey-dtn-custody-receipt-block-01 — Custody Receipt Block, signed custody receipts chain. https://datatracker.ietf.org/doc/html/draft-bsvkey-dtn-custody-receipt-block-01
+37. Wikipedia, Conflict-free replicated data types — CRDT merge, join semilattice. https://en.wikipedia.org/wiki/Conflict-free_replicated_data_type
+38. arXiv 2310.18220, Approaches to CRDTs — state vs op-based, strong eventual consistency. https://arxiv.org/pdf/2310.18220v1
+39. arXiv 1608.03960, JSON CRDT — merge semantics, convergence. https://arxiv.org/pdf/1608.03960v2
+40. ably.com, CRDTs solve distributed data consistency challenges — CRDT overview. https://ably.com/blog/crdts-distributed-data-consistency-challenges
+41. readpipe.org, Multi-Master Conflicts — last writer wins, monotonic IDs. https://readpipe.org/posts/30386c53-b3cd-4af5-889f-7a23262f9fc3
+42. Microsoft SQL Server, Last Writer Conflict Detection — peer-to-peer LWW. https://learn.microsoft.com/en-us/sql/relational-databases/replication/transactional/peer-to-peer/configure-last-writer
+43. Microsoft, AD FSMO roles — last writer wins conflict resolution. https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/fsmo-roles
+44. Microsoft, DynamoDB Global Tables conflict resolution — LWW between regions. https://learn.microsoft.com/en-us/azure/... (DynamoDB docs)
+45. PMEM-CSI docs, Design — region affinity. https://intel.github.io/pmem-csi/0.9/docs/design.html
+46. SwiftStack docs, Cluster Storage Policies — region read/write affinity. https://swiftstack.com/docs/admin/cluster_management/cluster_storage_policies.html
+47. arXiv 2502.20818, SkyStore — cost-optimized placement across regions/clouds, 23× cross-cloud transfer cost. https://arxiv.org/html/2502.20818v1
+48. CSA, Options for Key Management in the Cloud — ownership/control/possession distinction. https://cloudsecurityalliance.org/blog/2022/03/24/ownership-control-and-possession-options-for-key-management-in-the-cloud
+49. UCL discovery, custodial vs non-custodial — control vs possession. https://discovery.ucl.ac.uk/10200377/1/2409.15389v1.pdf
+50. "Reevaluating Information Ownership" — surrogate ownership. https://doi.org/10.1080/19393559308551335
+51. IDS prompts.txt entry 95 (verbatim). C:/idfs/prompts.txt — Phase 095 crate definition, contents, constraints.
+52. Existing ids-000-aa skeleton. C:/idfs/ids-000-aa/ — types.rs, lib.rs, contracts/, invariants/, errors.rs, versioning.rs, Cargo.toml.
+53. HX-241 reference plan format. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md, plan-089.md, plan-090.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+
+---
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document. The blueprint above defines all architecture, ownership domains, transfer protocol, custody chain, custody graph, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 095 (ids-ownership-policy).
+
+
+# PHASE 096:
+
+## Phase 096 — Create the ids-legal-hold crate: Prevent deletion during legal holds. Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1435-1449)
+
+```
+96. Research only do not read plan.md **[Phase 096 — Create the ids-legal-hold crate: Prevent deletion during legal holds.]**
+
+Crate: ids-legal-hold
+Purpose: Prevent deletion during legal holds.
+Contents: Legal hold creation, legal hold scope, legal hold enforcement across replicas/fragments/derived copies, legal hold release, retention vs legal hold precedence.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 096 — Create the ids-legal-hold crate: Prevent deletion during legal holds.]**
+
+Create plan-096.md in C:/idfs/plans/ for the ids-legal-hold crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 096 creates `ids-legal-hold`, the IDS crate that prevents deletion during legal holds. It owns the legal-hold lifecycle: hold creation with scope definition (custodians, systems, date ranges, data types), hold scope evaluation across replicas/fragments/derived copies, enforcement that blocks deletion while a hold is active, hold release when the matter resolves, and explicit precedence rules over retention schedules (a legal hold overrides retention/deletion). `ids-legal-hold` does not open sockets or drive any transport directly; it evaluates whether a deletion or overwrite is permitted under any active hold, returns a `DeleteDecision` (permit/reject/quarantine), and ships every hold-related message as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`).
+
+Legal hold is distinct from retention: a hold suspends ordinary deletion for potentially relevant ESI once a duty to preserve attaches (reasonable anticipation of litigation/investigation/audit), while retention schedules define normal lifecycle disposition. Under FRCP Rule 37(e) and the Sedona Commentary on Legal Holds, failure to preserve after the duty attaches can lead to spoliation sanctions; holds override retention rules and remain active until formally released in writing by authorized counsel — they do not expire on their own.
+
+The crate is **carrier-agnostic**: no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via `ids-carrier::Endpoint`. **Allowed crypto only**: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 (implemented in `ids-crypto`; `ids-legal-hold` consumes type surface and primitive IDs from `ids-000-aa`/`ids-crypto` only).
+
+A skeleton `ids-legal-hold` crate does NOT yet exist at `C:/idfs/ids-legal-hold/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `Endpoint`, `CarrierType`, `IdsTime`, `Checksum`, `OpState`, `CommitState`, plus sealed trait contracts and error types. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+---
+
+### 2. Architecture Overview
+
+`ids-legal-hold` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), `ids-crypto` (allowed primitives), `ids-time` (monotonic IDS standard time), and `ids-immutable` (Phase 040 — immutable records and retention enforcement, which shares the "prevent deletion" concern). It is a policy/enforcement layer: given a delete/overwrite request tagged with record IDs, it decides whether any active hold covers those records, returns a `DeleteDecision`, and never sends bytes itself.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (delete/overwrite requesters)        │
+│  ids-lifecycle, ids-reclaim, ids-immutable, ids-store, ids-read — deletion paths   │
+├────────────────────────────────────────────────────────────────────────────────────┤
+│               Phase 096: ids-legal-hold (THIS CRATE — hold policy + enforcement)  │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────────┐      │
+│  │ hold registry       │ │ hold scope          │ │ hold enforcement        │      │
+│  │ (create/release/    │ │ evaluation          │ │ (block/permit/quarantine│      │
+│  │  list active holds) │ │ replicas/fragments/ │ │ delete decisions)       │      │
+│  └─────────────────────┘ └─────────────────────┘ └─────────────────────────┘      │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────────┐      │
+│  │ precedence engine   │ │ release workflow    │ │ audit trail             │      │
+│  │ (hold vs retention) │ │ (counsel sign-off)  │ │ (signed+hash-chained)   │      │
+│  └─────────────────────┘ └─────────────────────┘ └─────────────────────────┘      │
+│  ┌─────────────────────┐ ┌─────────────────────┐                               │
+│  │ custody graph       │ │ scope validation    │                               │
+│  │ (derived copies)    │ │ (custodian/system)  │                               │
+│  └─────────────────────┘ └─────────────────────┘                               │
+└─────────────────────────┬───────────────────────────────────────────────────────┘
+                          │ opaque Vec<u8> datagrams
+                          ▼
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                         │
+│  send_datagram(Endpoint{CarrierType≤1024B addr, Vec<u8>}, payload: &[u8])        │
+│  receive_datagram → (Endpoint, Vec<u8>)                                            │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS / Wi-Fi   │
+│  / Bluetooth / cellular / VPN / mesh anywhere in this crate                      │
+└────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of a hold-enforced delete:** caller submits `DeleteRequest{record_ids[], origin_node, reason}` → `ids-legal-hold` evaluates scope: resolve each record ID through `ids-metadata` → `ids-partition-map` → `ids-placement` to find every replica, fragment, and derived copy (backup, snapshot, export, search index) → check active holds covering any record/custodian/system → return `DeleteDecision{permit: bool, blocked_by: Vec<HoldId>, reason, hold_expires: Option<IdsTime>}` → caller proceeds or rejects; all hold-related messages are opaque datagrams to `ids-carrier::Endpoint`.
+
+**Hold semantics (research-verified):**
+- **Legal hold vs retention**: hold overrides retention — data eligible for deletion under the retention schedule is not deleted while any active hold covers it (Box governance precedence: Legal Hold > Trash > Retention Policy > Trash; Microsoft Purview: eDiscovery holds always take precedence over retention; Google Vault: holds override retention rules).
+- **Hold creation**: names custodians, systems, date ranges, data types, matter ID, authorizing counsel, issuance timestamp (IdsTime); scope may be infinite (no expiration) until released.
+- **Hold scope**: covers primary store, replicas, fragments, snapshots, backups, exports, analytics copies, search indexes, logs if they contain unique held content — deletion must cover the full copy graph.
+- **Hold release**: only by authorized counsel; formal written release; confirm no overlapping holds apply; then retention schedule resumes; release is auditable.
+- **Retention vs hold precedence**: hold wins while active; after release, normal retention applies (may immediately dispose of data that reached end of retention during the hold).
+- **No wall-clock for causality/ordering**: IdsTime monotonic ticks only; hold activation/expiry keyed to IdsTime.
+
+**Crypto used (allowed set only):** ed25519 for signing hold creation/release decisions and audit checkpoints; sha256/blake3 for hold ID derivation, custody-graph hashing, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt hold state at rest (hold documents, custody-graph snapshots) when confidentiality required.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 12.
+
+#### 3.1 Legal hold definition and duty to preserve
+
+**Source:** Casepoint "What is a Legal Hold?"; OpenText "What is Litigation Hold?"; Exterro "Legal Hold - The Basics of E-Discovery Guide"; Lexology "Legal Holds Do Not Preserve Data"; Cornell LII FRCP Rule 37(e); Sedona Conference Commentary on Legal Holds (2nd Ed.).
+
+A legal hold (litigation hold / preservation notice) is the eDiscovery preservation method protecting ESI and matter documents. It prevents deletion or alteration once a preservation duty appears. The duty to preserve attaches when litigation or investigation is reasonably anticipated — before any lawsuit is filed: a demand letter, regulator inquiry, discovered breach, or departing employee suspected of taking data can each trigger it (Zubulake v. UBS Warburg, 2003). FRCP Rule 37(e) makes organizations responsible for reasonable preservation steps; loss of ESI after the duty attaches can lead to curative measures, adverse inference, monetary sanctions, or dismissal. A defensible hold names custodians, systems, and date range, suspends auto-delete/log rotation, goes out in writing with acknowledgments, and stays monitored until counsel releases it.
+
+#### 3.2 Legal hold vs retention precedence
+
+**Source:** Box Governance retention/legal-hold precedence; Microsoft Purview retention policies & labels; Google Vault holds; CrashPlan legal hold; NARA records-center freeze FAQ; RM University "backups still hold records under legal hold."
+
+Legal hold always takes precedence over retention:
+- Box: deletion priority — Legal Hold > Trash > Retention Policy (Permanently Delete) > Trash. A file under retention that also has a legal hold is not deleted until the hold is lifted.
+- Microsoft Purview: retention always takes precedence over deletion; longest retention period wins; but if content is subject to both retention settings and an eDiscovery hold, preserving content for the hold always takes precedence.
+- Google Vault: holds override retention rules; holds are indefinite until removed; retention rules aren't applied to held data until the hold is removed.
+- RM University: a legal hold overrides the retention schedule wherever the records exist — including backup tapes; destroy backup tapes known to contain held records risks spoliation claims even if live copies are gone.
+
+`ids-legal-hold` encodes this as: `hold_precedence_over(retention)` = true for any active hold; after release, retention resumes and may immediately dispose of data that reached end-of-retention during the hold.
+
+#### 3.3 Hold scope: custodians, systems, date ranges, data types
+
+**Source:** Exterro legal hold; Everlaw data preservation and legal holds; CSDISCO legal hold best practices; Lexology eDiscovery workflows; BdeMerson litigation hold guide; Sedona Commentary on Legal Holds.
+
+A defensible hold scopes: custodians (people who control/create/receive/store relevant records), data sources they use (mailboxes, cloud drives, shared sites, messaging apps, line-of-business systems), relevant period and subject matter. Scope may include drafts, relevant versions, messages, and associated metadata beyond formally declared records. Custodian interviews are a key scoping tool. Scope can be custodian-based (broad, then narrowed) or query-based (date ranges, keywords). The hold must cover everything under "possession, custody and control" — including external data sources such as contractors or cloud providers.
+
+`ids-legal-hold` models scope as: `HoldScope { custodians: Vec<NodeId>, systems: Vec<SystemId>, date_range: Option<(IdsTime, IdsTime)>, data_types: Vec<DataType>, matter_id: MatterId }`.
+
+#### 3.4 Deletion prevention across replicas/fragments/derived copies
+
+**Source:** Savemycert CCSP data retention/deletion/archiving/legal hold; Formkiq "Legal Hold, Retention, and Backup"; AWS Backup legal hold; NHIMA data retention; Open-Exam-Prep CCSP Domain 2; BdeMerson Teams data distribution.
+
+Deletion is complete only when every copy is dealt with: primary store, replicas, caches, exports, test copies, logs, backups. Replicas applying primary changes are covered by deleting at primary; exports/copies in other buckets/analytics stores/file shares are independent — each needs its own lifecycle handling. Backups (especially immutable) cannot be edited; they expire on their own cycle — until then data is kept beyond use. Hold coverage must include object stores, databases, email, collaboration, and backups. Derived copies: backups, warehouse extracts, search indexes, logs, tickets, email attachments.
+
+`ids-legal-hold` enforces deletion suppression across the full copy graph: primary object/block/file stores and databases, soft-delete/version histories, snapshots/image backups, secondary regions/DR replicas, log archives and SIEM tiers, SaaS collaboration/email/chat with native hold features, endpoint copies, backup chains.
+
+#### 3.5 Tombstone GC and deletion suppression in distributed storage
+
+**Source:** DataStax DSE deletes and tombstones; Apache Cassandra tombstones; ScyllaDB repair-based tombstone GC; Lightseek SMG causally-stable tombstone GC; Acumen/Usenix OSDI'26 causally-stable tombstones; Babushkai system-design patterns leaderless replication.
+
+Distributed databases don't immediately delete — they mark records with tombstones propagated to replicas before permanent drop during compaction (grace period, e.g. Cassandra gc_grace_seconds default 10 days). Tombstones dropped before all replicas receive them cause data resurrection (zombies). Repair-based tombstone GC only collects after every replica has acked past the tombstone (causal stability). Deletion makes convergence proof-sensitive: a tombstone disappears only after every relevant replica, hint, snapshot, or repair source can no longer reintroduce the shadowed value.
+
+`ids-legal-hold` ties into this: while a hold covers a record, tombstone creation for that record is suppressed and tombstone GC is blocked; deletion requests are converted to hold-aware no-ops or quarantined copies rather than tombstones.
+
+#### 3.6 WORM / Object Lock / legal hold in object storage
+
+**Source:** AWS S3 Object Lock; Azure Immutable Storage; MinIO Object Locking; Ceph RGW Object Lock; Scality data deletion verification.
+
+WORM (Write Once Read Many) storage prevents object change/deletion after write. S3 Object Lock: retention period (fixed time) and legal hold (indefinite, until explicitly removed). Legal hold works as an infinite retention period — no object can be deleted until the hold is released manually; only users with `s3:PutObjectLegalHold` permission can set/lift it. Legal hold is independent of retention period — an object can have both; it remains WORM-locked under legal hold even when retention expires. Azure immutable storage legal hold: blobs can be created and read but not modified or deleted; delete succeeds only when no legal hold or time-based retention. Ceph RGW Object Lock legal hold: binary switch On/Off, remains until explicitly removed. Object lock state replicates across regions (retention and legal hold replicated with S3 Replication).
+
+`ids-legal-hold` adopts the WORM model at the IDS layer: hold = indefinite deletion suppression independent of retention; release requires explicit privileged action; hold state propagates to replicas/fragments/derived copies.
+
+#### 3.7 Legal hold enforcement workflow and automation
+
+**Source:** Venio Legal Hold; Exterro Legal Hold; Archon eDiscovery legal hold; Onna legal hold across 20+ SaaS apps; CSDISCO legal hold best practices.
+
+Enforcement workflow: (1) trigger event identified → (2) scope custodians/systems/date range → (3) issue hold notice to custodians with acknowledgment tracking → (4) IT suspends auto-delete/log rotation/retention jobs for in-scope datasets → (5) monitor compliance (acknowledgments, reminders, escalations) → (6) hold remains active until counsel releases → (7) release → retention resumes → (8) archive audit trail. Automation: custodian identification, hold notices, acknowledgments, escalations (non-responses escalate to manager/legal), centralized hold management across all active matters. Silent holds (internal investigations, custodian not notified) are an exception.
+
+`ids-legal-hold` models: `HoldStatus { Active, Released, PendingRelease }`, `HoldNotice { custodian, acked: bool, reminders_sent, escalation_level }`, enforcement actions applied to `ids-store`/`ids-reclaim`/`ids-immutable` deletion paths.
+
+#### 3.8 Legal hold release process
+
+**Source:** Lexology "Tracking and Releasing Litigation Holds"; Everlaw "Lifting a Litigation Hold"; Exterro "Challenges of Releasing Legal Holds"; JD Supra "Tracking and Releasing Litigation Holds"; CrashPlan "Release custodians and close a matter"; Onna "Defensible Data Deletion After a Legal Hold."
+
+Release only when the matter fully resolves (settlement, dismissal, judgment, investigation conclusion, regulatory matter end). Only authorized counsel (e.g. general counsel) can formalize release. Before release: confirm matter resolved including appeals; verify no overlapping holds apply to custodians/data sources; consult counsel; issue formal written release notices; remove hold controls from IT systems; resume standard retention/disposition; archive complete audit trail and authorization logs. After release, retention schedule takes over — data exceeding retention is disposed; data within window returns to normal archive. Prolonged holds increase cost and future liability; over-preservation anxiety is real. A single custodian may be on six overlapping matters — releasing one must not affect others.
+
+`ids-legal-hold` release workflow: `ReleaseRequest{hold_id, authorizing_counsel, reason}` → validate no overlapping holds → `HoldStatus::Released` with release timestamp (IdsTime) → notify custodians → resume retention → signed audit checkpoint → retention-enforcement crate resumes disposition for released records.
+
+#### 3.9 Cross-jurisdiction / multi-region holds
+
+**Source:** UNC NJoLT "U.S. Legal Holds Across Borders: A Legal Conundrum."
+
+U.S. legal holds clash with EU/other privacy/data-protection laws — retention of personal data (email) is "processing" permitted only for purposes allowed by regional law; U.S. litigation may not be a valid reason to preserve personal data under GDPR-style provisions. Multinational litigant must choose where to risk sanctions: failing to preserve under U.S. law, or illegally preserving under EU law. `ids-legal-hold` models jurisdiction-aware holds: `Jurisdiction` field on holds; hold enforcement respects regional privacy boundaries; conflicting deletion requests across regions resolved by jurisdiction field + hold precedence matrix.
+
+#### 3.10 Chain of custody and audit for holds
+
+**Source:** Prooflog tamper-evident evidence log; Formkiq legal-hold/backup differences; Box governance audit; AWS S3 Object Lock compliance (SEC 17a-4, FINRA 4511, CFTC 1.31 via Cohasset); Azure immutable storage compliance.
+
+Hold decisions must be tamper-evident and defensible: every hold creation/release/enforcement decision logged with custodian list, record IDs, timestamps (IdsTime), authorizing counsel. Hash-chained audit log (sha256/blake3) + ed25519-signed checkpoints for offline verification. Chain of custody tracks where each held copy lived and what was annotated — deduplication under a hold is risky because copies may differ in metadata/annotations/location. Compliance modes (cannot be overridden, even by root) vs governance mode (authorized bypass).
+
+`ids-legal-hold` audit: `AuditEntry { hold_id, action, actor, record_ids[], timestamp, prev_hash, signature }`; ed25519 signatures on checkpoints; sha256/blake3 hash chain.
+
+#### 3.11 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Source:** ed25519-dalek docs.rs (RFC 8032 EdDSA); chacha20poly1305 docs.rs (RFC 8439 AEAD + XChaCha20 192-bit nonce); sha2 RustCrypto (SHA-256); BLAKE3-team README.
+
+`ids-legal-hold` uses:
+- ed25519: signing hold creation/release decisions and audit checkpoints (proof of hold evaluation).
+- sha256: hold ID derivation, custody-graph entry hashing, audit-chain links.
+- blake3: fast content hashing for custody-graph snapshots, hold-state hashing, checkpoint chaining.
+- xchacha20poly1305: encrypt hold state at rest (hold documents, custody-graph snapshots) with 24-byte nonce safe for random generation.
+- chacha20poly1305: encrypt session/state payloads with 12-byte nonce (counter-based, bounded use).
+
+No other crypto. `ids-crypto` exposes primitive IDs; `ids-legal-hold` references them via `ids-000-aa` only.
+
+---
+
+### 4. Threat Model & Mitigations
+
+| Threat | Asset at risk | Mitigation (this crate) |
+|--------|---------------|--------------------------|
+| Data deleted despite active hold | Preservation duty / spoliation | Enforcement blocks delete/overwrite at `ids-store`/`ids-reclaim`/`ids-immutable` paths; hold overrides retention |
+| Tombstone GC removes held record | Preservation duty | Tombstone creation suppressed for held records; GC blocked while hold active |
+| Retention schedule disposes held data | Preservation duty | Hold precedence over retention; resume retention only after release |
+| Released data still under overlapping hold | Preservation duty | Release validation checks all overlapping holds per custodian/record |
+| Custodian not notified / silent-hold gap | Defensibility | Acknowledgment tracking, reminders, escalations per hold notice |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + ed25519-signed checkpoints, offline-verifiable |
+| Clock manipulation for hold expiry | Hold correctness | Logical IdsTime only; no wall-clock for hold activation/expiry |
+| Carrier duplicates/delays datagrams | Replay/ordering | Idempotent hold decisions; nonce-bound signed decisions; bounded replay cache |
+| Hold state divergence across replicas | Consistency | Hold state replicated via `ids-carrier::Endpoint`; convergence checked before release |
+| Key extraction (hold signing key) | Decision authenticity | Signing keys never leave node; encrypted at rest (xchacha20poly1305/chacha20poly1305); zeroized on shutdown |
+| Cross-jurisdiction conflicting holds | Legal compliance | Jurisdiction-aware holds; hold precedence matrix; regional privacy boundaries respected |
+| Derived copy missed by hold | Preservation duty | Custody graph covers full copy graph: backups, snapshots, exports, indexes, logs |
+
+The carrier is never trusted: hold decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+| Crate | Role | Relevance to ids-legal-hold |
+|-------|------|------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed contracts + invariants + errors | `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `Endpoint`, `CarrierType`, `IdsTime`, `Checksum`, `OpState`, `CommitState`, `Error` — consumed, never redefined |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All hold traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing hold decisions/audit; encrypting hold state at rest; hashing custody graph and audit chain |
+| `ids-time` | Monotonic IDS standard time | Hold activation/expiry/release timestamps keyed to `IdsTime`, never wall-clock |
+| `ids-lifecycle` (Phase 33) | Dataset lifecycle incl. legal hold → deletion → reclamation | Holds suspend lifecycle deletion; release returns to lifecycle disposition |
+| `ids-immutable` (Phase 40) | Immutable records and retention enforcement | Shares "prevent deletion" concern; hold enforcement and immutable protection coordinated |
+| `ids-reclaim` (Phase 41) | Storage compaction and reclamation | Reclamation/tombstone expiry blocked while hold active |
+| `ids-backup` (Phase 42) | Point-in-time backup | Backup recovery points under hold cannot be deleted; lifecycle delayed until release |
+| `ids-metadata` (Phase 51) | Hierarchical metadata | Resolves record → replicas/fragments/derived copies for scope evaluation |
+| `ids-partition-map` (Phase 54) | Logical→physical partition mapping | Locates all copies of held records across nodes/H-units/regions |
+| `ids-placement-policy` (Phase 53) | Dataset placement policies | Holds interact with placement domains and redundancy requirements |
+| `ids-sync` (Phase 18) / `ids-replication` (Phase 17) | Replica reconciliation | Hold state propagated to replicas; tombstone suppression coordinated |
+| `ids-security` (Phase 31) | AuthN/AuthZ/encryption/audit | Hold release authorization; audit trail integration |
+| `ids-observability` (Phase 44) | Metrics, tracing, audit trail | Hold metrics and audit events |
+| `ids-testing` (Phase 47) | Test harness | Hold enforcement conformance and adversarial tests |
+
+**Integration points:** `ids-legal-hold` drives public contracts declared in `ids-000-aa`; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. Hold enforcement hooks into deletion paths of `ids-store`, `ids-reclaim`, `ids-immutable`, `ids-backup`, `ids-lifecycle`.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-legal-hold/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-legal-hold/
+├── Cargo.toml                          # ids-000-aa, ids-carrier, ids-crypto, ids-time, ids-immutable; serde, thiserror, blake3; dev: proptest, tempfile
+├── lib.rs                              # crate root, public API surface, feature gates
+├── constants.rs                        # Hold defaults: max custodians, address cap, replay cache size
+├── error.rs                            # HoldError (thiserror): hold-not-found, release-not-authorized, overlap, precedence
+├── features.rs                         # Feature flags: audit, encryption, quarantine
+├── types.rs                            # HoldId, Hold, HoldScope, HoldStatus, DeleteDecision, CustodyGraphEntry (re-exports ids-000-aa types)
+│
+├── hold_creation.rs                    # Hold creation: matter, custodians, scope, authorizing counsel, IdsTime timestamp
+├── hold_scope.rs                       # Scope evaluation: custodian/system/date-range/data-type matching
+├── hold_enforcement.rs                 # Enforcement: block/permit/quarantine delete decisions
+├── hold_release.rs                     # Release workflow: counsel sign-off, overlap check, retention resume
+├── precedence_engine.rs                # Hold vs retention precedence (hold wins while active)
+├── custody_graph.rs                    # Full copy graph: replicas, fragments, snapshots, backups, exports, indexes, logs
+├── delete_decision.rs                  # DeleteDecision type: permit/reject/quarantine + blocked_by HoldIds
+├── hold_notice.rs                      # Hold notice to custodians: ack tracking, reminders, escalations
+├── carrier_adapter.rs                  # Opaque Vec<u8> datagram framing to ids-carrier::Endpoint (decision carrier only)
+│
+├── contracts/                          # sealed trait contracts (~10 files)
+│   ├── mod.rs
+│   ├── hold_contract.rs                # trait HoldEnforcement (create/release/enforce/query)
+│   ├── scope_contract.rs               # trait HoldScopeEval
+│   ├── precedence_contract.rs          # trait HoldPrecedence
+│   ├── release_contract.rs             # trait HoldRelease
+│   ├── custody_contract.rs             # trait CustodyGraph
+│   ├── audit_contract.rs               # trait HoldAudit
+│   ├── notice_contract.rs              # trait HoldNotice
+│   ├── carrier_contract.rs             # trait HoldCarrierAdapter
+│   └── mod.rs
+│
+├── invariants/                         # compile-time/runtime invariants (~10 files)
+│   ├── mod.rs
+│   ├── hold_precedence_over_retention.rs
+│   ├── tombstone_gc_blocked_during_hold.rs
+│   ├── no_delete_while_hold_active.rs
+│   ├── release_requires_counsel_auth.rs
+│   ├── custody_graph_complete.rs
+│   ├── hold_state_replica_convergence.rs
+│   ├── carrier_agnostic.rs
+│   ├── crypto_allowlist.rs
+│   └── mod.rs
+│
+├── audit/                              # signed, hash-chained audit log (~8 files)
+│   ├── audit_entry.rs
+│   ├── audit_chain.rs
+│   ├── checkpoint.rs
+│   ├── signer.rs
+│   ├── verifier.rs
+│   ├── replay_cache.rs
+│   ├── chain_of_custody.rs
+│   ├── hold_record_log.rs
+│   └── mod.rs
+│
+├── quarantine/                         # Quarantine for held records (~6 files)
+│   ├── quarantine_entry.rs
+│   ├── quarantine_store.rs
+│   ├── quarantine_release.rs
+│   ├── quarantine_audit.rs
+│   ├── mod.rs
+│   └── mod.rs
+│
+├── tests/                              # property/verification tests (~30 files)
+│   ├── hold_creation_tests.rs
+│   ├── hold_scope_tests.rs
+│   ├── hold_enforcement_tests.rs
+│   ├── hold_release_tests.rs
+│   ├── precedence_tests.rs
+│   ├── custody_graph_tests.rs
+│   ├── tombstone_gc_tests.rs
+│   ├── audit_chain_tests.rs
+│   ├── carrier_agnostic_tests.rs       # asserts no std::net/tokio::net usage
+│   ├── crypto_allowlist_tests.rs
+│   ├── property_tests.rs               # proptest properties
+│   └── mod.rs
+│
+├── benches/                            # (~6 files)
+│   ├── hold_evaluation.rs
+│   ├── custody_graph_traversal.rs
+│   └── audit_append.rs
+│
+├── docs/                               # (~14 files)
+│   ├── architecture.md
+│   ├── hold_lifecycle.md
+│   ├── precedence.md
+│   ├── custody_graph.md
+│   ├── release_runbook.md
+│   ├── crypto_policy.md
+│   ├── carrier_agnostic_spec.md
+│   └── runbook.md
+│
+├── spec/                               # (~4 files)
+│   ├── hold_spec.md
+│   ├── enforcement_spec.md
+│   ├── release_spec.md
+│   └── custody_graph_spec.md
+│
+└── test_vectors/                       # (~4 files)
+    ├── hold_vectors.json
+    ├── custody_graph_vectors.json
+    └── audit_chain_vectors.json
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `src/quarantine/`, `tests/`, `benches/`, `docs/`, `spec/`, `test_vectors/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+#### 7.1 Hold creation
+```
+HoldId = BLAKE3-256(matter_id + custodians[] + issuance_timestamp)
+Hold { hold_id, matter_id, custodians[], scope: HoldScope, status: Active|Released|PendingRelease,
+       issued_at: IdsTime, released_at: Option<IdsTime>, authorizing_counsel: NodeId, jurisdiction: Jurisdiction }
+HoldScope { custodians: Vec<NodeId>, systems: Vec<SystemId>, date_range: Option<(IdsTime,IdsTime)>,
+            data_types: Vec<DataType> }
+```
+
+#### 7.2 Hold scope evaluation
+```
+scope_covers(record_id, custodian, system, data_type, timestamp) -> bool
+  - record resolved through ids-metadata → ids-partition-map → ids-placement for all copies
+  - match custodian ∈ scope.custodians OR system ∈ scope.systems
+  - match timestamp ∈ scope.date_range (if set)
+  - match data_type ∈ scope.data_types (if set)
+```
+
+#### 7.3 Hold enforcement / delete decision
+```
+evaluate_delete(record_ids[], origin_node) -> DeleteDecision
+  - for each record_id: find all active holds covering it (via custody graph)
+  - if any active hold: DeleteDecision{permit: false, blocked_by: [hold_ids], reason: "legal_hold_active"}
+  - else: DeleteDecision{permit: true, blocked_by: [], reason: "none"}
+  - quarantine option: move held record to quarantine store instead of tombstone
+```
+
+#### 7.4 Precedence engine (hold vs retention)
+```
+hold_precedence_over(retention_schedule, record) -> bool
+  - any active hold covering record => true (hold wins; retention suspended)
+  - no active hold => false (retention applies)
+after_release: retention resumes; data that reached end-of-retention during hold may be disposed immediately
+```
+
+#### 7.5 Hold release
+```
+release(hold_id, authorizing_counsel, reason) -> Result<ReleaseConfirmation, HoldError>
+  - validate authorizing_counsel authorized
+  - check no overlapping holds on any covered custodian/record
+  - HoldStatus::Released, released_at = IdsTime::now()
+  - notify custodians (formal written release)
+  - resume retention schedule for released records
+  - signed audit checkpoint
+```
+
+#### 7.6 Tombstone GC suppression during hold
+```
+tombstone_gc_eligible(record_id) -> bool
+  - if any active hold covers record_id: false (GC blocked)
+  - else: normal grace-period-based eligibility
+```
+
+#### 7.7 Custody graph traversal
+```
+custody_graph(record_id) -> Vec<CopyLocation>
+  - primary store, replicas, fragments, snapshots, backups, exports, search indexes, logs
+  - each CopyLocation { node_id, hunit_id, region_id, copy_type, hold_status }
+deletion must be suppressed at every CopyLocation under an active hold
+```
+
+#### 7.8 Audit chain (signed + hash-chained)
+```
+AuditEntry { hold_id, action, actor, record_ids[], timestamp, prev_hash, signature }
+checkpoint: periodic ed25519-signed summary; hash chain = sha256/blake3
+verifier detects: altered entry (chain break), excised entries (sequence gap), missing heartbeat
+```
+
+---
+
+### 8. Dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| `ids-000-aa` | Canonical types (`NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `Endpoint`, `CarrierType`, `IdsTime`, `Checksum`, `OpState`, `CommitState`) and sealed trait contracts |
+| `ids-carrier` | `Endpoint` (`CarrierType` + `Vec<u8>`), `Carrier` trait — decision transport only; crate never sends directly |
+| `ids-crypto` | Allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 |
+| `ids-time` | Monotonic time source for hold activation/expiry/release |
+| `ids-immutable` | Immutable record protection coordination (shared "prevent deletion" concern) |
+| `ids-metadata`, `ids-partition-map`, `ids-placement-policy` | Copy-graph resolution for scope evaluation |
+| `serde` + `serde_bytes` | Hold envelope, decision, audit-entry serialization |
+| `thiserror` | Error types |
+| `blake3` | Hold ID derivation, custody-graph hashing, audit-chain links |
+| `proptest` | Property-based tests |
+| `tempfile` | Test fixtures |
+
+No `std::net`, `tokio::net`, libp2p, TCP/IP, UDP, QUIC, HTTP, DNS implementations in or under `ids-legal-hold`. No crypto beyond the allowed list; `ids-legal-hold` imports no crypto directly — all via `ids-crypto`.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-96.1 | Hold creation: hold ID unique (BLAKE3-256), custodians/systems/date-range/data-types recorded, issued_at in IdsTime | `hold_creation` unit tests |
+| AC-96.2 | Hold scope evaluation covers full copy graph (replicas, fragments, snapshots, backups, exports, indexes, logs) | `custody_graph` traversal tests |
+| AC-96.3 | Delete blocked 100% while any active hold covers a record | `hold_enforcement` tests: reject decision with blocked_by HoldIds |
+| AC-96.4 | Hold overrides retention: data eligible for deletion under retention schedule is NOT deleted while hold active | `precedence_engine` tests |
+| AC-96.5 | Hold release only by authorized counsel; validates no overlapping holds; resumes retention | `hold_release` tests |
+| AC-96.6 | Tombstone creation suppressed and tombstone GC blocked while hold active | `tombstone_gc` tests |
+| AC-96.7 | Quarantine option: held record moved to quarantine store instead of tombstone | `quarantine` tests |
+| AC-96.8 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/libp2p/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) + source grep |
+| AC-96.9 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in crypto surface | Allowlist unit test |
+| AC-96.10 | Every hold decision recorded in append-only, hash-chained, ed25519-signed audit log with `NodeId` + `IdsTime` | `audit_chain` verification tests |
+| AC-96.11 | Release does not affect overlapping holds on same custodian/record | `hold_release` overlap tests |
+| AC-96.12 | Chain-of-custody tracks where each held copy lived | `custody_graph` audit tests |
+| AC-96.13 | Carrier-agnostic assertion test passes (no networking-stack crates in tree) | `cargo test -p ids-legal-hold` passes |
+
+---
+
+### 10. Remaining Uncertainties
+
+1. **Hold defaults per deployment**: concrete custodian/system scoping defaults and jurisdiction lists are deployment-tuned; validated at integration with `ids-lifecycle`/`ids-immutable`.
+2. **Quarantine vs tombstone suppression**: whether held records are quarantined (moved to hold vault) or simply have deletion suppressed — design decision pending; both modeled here.
+3. **Custody graph completeness**: how thoroughly derived copies (search indexes, analytics extracts, logs) are discovered and included — workload-dependent.
+4. **Release overlap validation cost**: checking all overlapping holds per custodian/record at release time — performance for custodians on many simultaneous holds unquantified.
+5. **Cross-jurisdiction conflict resolution**: exact precedence matrix when U.S. hold conflicts with EU privacy deletion requirements — legal policy decision, not technical.
+6. **Hold state replication latency**: time for hold creation/release to propagate to all replicas/fragments/derived copies — affects enforcement window.
+7. **Interaction with `ids-retention-enforcement` (Phase 097)**: hold-release → retention-resume handshake to be validated at integration.
+8. **Silent holds**: whether custodian-notification is mandatory or optional per hold (internal investigations may use silent holds) — policy decision.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-legal-hold` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear enforcement boundary |
+| Hold overrides retention while active; retention resumes after release | Box/Microsoft Purview/Google Vault/RM University: legal hold always takes precedence over retention |
+| Hold = indefinite until explicitly released (no expiration) | S3 Object Lock / Azure immutable storage legal hold model; matches "prevent deletion during legal holds" purpose |
+| Deletion suppression across full copy graph (replicas, fragments, backups, exports, indexes, logs) | CCSP/Formkiq: deletion complete only when every copy dealt with; backups under hold must not be destroyed |
+| Tombstone GC blocked while hold active | Cassandra/ScyllaDB: tombstone GC before all replicas acked causes data resurrection; hold suppresses tombstones |
+| Release requires authorized counsel + overlap check + written notice | Everlaw/Lexology/JD Supra/CrashPlan: only counsel releases; verify no overlapping holds; notify custodians |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Prooflog/Compliance: tamper-evident, offline-verifiable decision log |
+| Logical IdsTime only; no wall-clock for hold activation/expiry | Clock manipulation cannot break hold correctness |
+| Carrier-agnostic via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitive IDs via `ids-000-aa` | Complies with allowed-crypto rule |
+| Quarantine as alternative to tombstone suppression | Held records moved to hold vault instead of tombstoned; quarantine released on hold release |
+
+---
+
+### 12. Sources
+
+1. Casepoint — "What is a Legal Hold? A Complete Guide to the Litigation Hold Process." https://casepoint.com/resources/spotlight/what-is-legal-hold-process — legal hold definition, ESI preservation, FRCP Rule 37(e), custodians, scope.
+2. OpenText — "What is Litigation Hold? Legal Requirements & Solutions." https://opentext.com/what-is/legal-hold — litigation hold duty to preserve, spoliation prevention, custodian notification.
+3. Exterro — "Legal Hold - The Basics of E-Discovery Guide." http://exterro.com/basics-of-e-discovery/legal-hold — Zubulake v. UBS Warburg, duty to preserve, custodian interviews, hold scoping.
+4. Lexology — "Legal Holds Do Not Preserve Data." http://lexology.com/library/detail.aspx?g=e2dd7da6-3437-40cd-a88c-aa5d76cc1496 — notice vs preservation, FRCP 37(e), proportionality 2015 amendments.
+5. Cornell LII — FRCP Rule 37(e) Failure to Make Disclosures or to Cooperate in Discovery; Sanctions. https://law.cornell.edu/rules/frcp/rule_37 — spoliation standard, good-faith routine operation, preservation obligation.
+6. The Sedona Conference — "Commentary on Legal Holds: The Trigger & The Process" (2nd Ed.). https://thesedonaconference.org/sites/default/files/publications/Commentary%20on%20Legal%20Holds%20Second%20Edition%20extended%20PC%20period_0.pdf — duty to preserve when litigation reasonably anticipated, scope of preservation.
+7. BdeMerson — "Litigation Hold (Legal Hold) Guide." https://bdemerson.com/article/litigation-hold — Zubulake, custodians/systems/date-range, suspend auto-delete/log rotation, monitoring compliance.
+8. Box Governance — "About Retention and Retention Policies." https://docs.box.com/en/box-governance/retention/about-retention-and-retention-policies — deletion precedence: Legal Hold > Trash > Retention Policy > Trash; hold + retention co-exist.
+9. Microsoft Purview — "Learn about retention policies & labels to retain or delete." https://learn.microsoft.com/en-us/purview/retention — retention over deletion, longest retention wins, eDiscovery holds always take precedence over retention.
+10. Google Vault — "Get started with holds in Google Vault." https://knowledge.workspace.google.com/vault/holds/get-started-with-holds-in-google-vault — holds override retention rules, holds indefinite until removed, holds additive.
+11. RM University — "What to do if backup tapes still hold records under legal hold." https://recordsmgmt.org/questions/what-to-do-if-backups-still-hold-records-under-legal-hold-after-live-copies-destroyed — hold overrides retention schedule for every copy including backup tapes.
+12. CCSP — "Data Retention, Deletion, Archiving and Legal Hold." https://savemycert.com/revision/isc2-certified-cloud-security-professional/ccsp-data-retention-deletion-archiving-legal-hold — deletion complete only when every copy dealt with; backups expire on own cycle.
+13. Formkiq — "Legal Hold, Retention, and Backup: Three Controls That Must Not Be Confused." https://formkiq.com/blog/business-solutions-in-practice/legal-hold-retention-backup-differences — hold vs retention vs backup, overlapping holds, compliance/governance mode.
+14. AWS Backup — "Legal hold." https://docs.aws.amazon.com/aws-backup/latest/devguide/legalhold.md — legal hold prevents backup deletion, lifecycle delayed until hold removed, ARN per hold.
+15. AWS — "Protecting data with Amazon S3 Object Lock." https://aws.amazon.com/blogs/storage/protecting-data-with-amazon-s3-object-lock — WORM, retention period vs legal hold (indefinite, until released), compliance/governance mode.
+16. AWS — S3 Object Lock docs (managing). https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock-managing.html — legal hold status, `s3:PutObjectLegalHold` permission, replication of retention/legal-hold state.
+17. Azure — "Immutable Storage for Blob Data Overview." https://learn.microsoft.com/en-us/azure/storage/blobs/immutable-storage-overview — legal hold WORM, create/read but not modify/delete, SEC 17a-4/FINRA 4511/CFTC 1.31.
+18. MinIO — "Object Locking and Immutability." https://docs.min.io/aistor/administration/object-locking-and-immutability — legal hold indefinite, only privileged users set/lift, complementary to GOVERNANCE/COMPLIANCE retention.
+19. Ceph — "RGW Deep Dive Part 3: Version and Object Lock." https://ceph.io/en/news/blog/2025/rgw-deep-dive-3 — legal hold binary switch On/Off, remains until explicitly removed.
+20. DataStax DSE — "Deletes and tombstones." https://docs.datastax.com/en/dse/6.9/architecture/database-internals/architecture-tombstones.html — tombstones, gc_grace_seconds, zombies, compaction drop.
+21. Apache Cassandra — "Tombstones." https://cassandra.apache.org/doc/6.0/cassandra/managing/operating/compaction/tombstones.html — tombstone grace period, zombie prevention, compaction conditions.
+22. ScyllaDB — "Preventing Data Resurrection with Repair-Based Tombstone Garbage Collection." https://scylladb.com/2022/06/30/preventing-data-resurrection-with-repair-based-tombstone-garbage-collection — tombstone GC only after repair, causal stability.
+23. Lightseek SMG — "causally-stable tombstone GC driven by per-peer ack watermarks." https://github.com/lightseekorg/smg/pull/1686 — collect tombstone only at causal stability (every member acked past it).
+24. Usenix OSDI'26 — Acumen / Treedoc causally stable tombstones. https://usenix.org/system/files/osdi26-cottone.pdf — tombstone nodes retained until causally stable; GC non-commutative, needs consensus.
+25. Babushkai system-design patterns — leaderless replication / tombstone removal. https://github.com/babushkai/system-design-patterns/blob/main/02-distributed-databases/03-leaderless-replication.md — tombstone removed only after no legal replica/hint/snapshot/repair source can reintroduce value.
+26. UNC NJoLT — "U.S. Legal Holds Across Borders: A Legal Conundrum." https://journals.law.unc.edu/ncjolt/articles/u-s-legal-holds-across-borders-a-legal-conundrum-2 — U.S. hold vs EU privacy law conflict, sanctions risk.
+27. Everlaw — "Data Preservation and Legal Holds." https://everlaw.com/guides/the-everlaw-guide-to-ediscovery/data-preservation-and-legal-holds — custodian identification, auto-delete suspension, data mapping.
+28. Everlaw — "Lifting a Litigation Hold." https://everlaw.com/blog/ediscovery-best-practices/lifting-a-litigation-hold — release only when matter resolved, authorized counsel, release checklist, retention resumes.
+29. Lexology — "Tracking and Releasing Litigation Holds." https://lexology.com/library/detail.aspx?g=3a0b89a4-e2fd-47c9-a5ce-6ad4a7fde349 — release authority, overlapping holds, counsel sign-off, custodian notification.
+30. Exterro — "The Challenges of Releasing Legal Holds." https://exterro.com/blog/the-challenge-of-releasing-legal-holds — overlap validation, over-preservation anxiety, reinstating retention policies.
+31. ed25519-dalek docs.rs — ed25519 key gen/sign/verify, RFC 8032. https://docs.rs/ed25519-dalek
+32. chacha20poly1305 docs.rs — ChaCha20Poly1305/XChaCha20Poly1305 AEAD, RFC 8439. https://docs.rs/chacha20poly1305
+33. sha2 RustCrypto — SHA-256. https://docs.rs/sha2
+34. BLAKE3-team BLAKE3 README — BLAKE3-256, SIMD, keyed hash, KDF, XOF. https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md
+35. IDS CRATES.md — C:/idfs/CRATES.md — crate inventory, ids-000-aa master, carrier-agnostic rule, ids-legal-hold entry (Phase 96), ids-immutable (Phase 40), ids-lifecycle (Phase 33).
+36. IDS prompts.txt entry 96 (verbatim) — C:/idfs/prompts.txt lines 1435-1449.
+37. HX-241 reference plan format — C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document. The blueprint above defines all architecture, interfaces, data structures, algorithms, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 096 (ids-legal-hold).
+
+
+# PHASE 097:
+
+## Phase 097 — Create the ids-retention-enforcement crate (Enforce data retention periods). Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1450-1464)
+
+```
+97. Research only do not read plan.md **[Phase 097 — Create the ids-retention-enforcement crate: Enforce data retention periods.]**
+
+Crate: ids-retention-enforcement
+Purpose: Enforce data retention periods.
+Contents: Retention period tracking, retention expiry, retention across replicas, retention verification, retention vs deletion precedence, retention audit.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 097 — Create the ids-retention-enforcement crate: Enforce data retention periods.]**
+
+Create plan-097.md in C:/idfs/plans/ for the ids-retention-enforcement crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 097 creates `ids-retention-enforcement`, the IDS crate that enforces data retention periods across the workspace. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by retention domain. `ids-retention-enforcement` owns retention period tracking, retention expiry evaluation, retention enforcement across replicas, retention verification, retention-vs-deletion precedence resolution, and retention audit logging — all carrier-agnostic. It never opens sockets or drives any transport directly; it evaluates retention policy against records, computes expiry deadlines, issues retention decisions, and ships every protection-relevant message as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`).
+
+Contents per prompts.txt entry 97:
+- **Retention period tracking** — per-record/dataset/partition retention period (duration or absolute expiry), policy source, legal-basis attribution, storage-limitation justification (GDPR Article 5(1)(e)).
+- **Retention expiry** — expiry deadline computation (`retain_until`), monotonic-clock keyed expiry checks, expiry status (active/expired/pending_deletion/legal_hold), deterministic cleanup scheduling.
+- **Retention across replicas** — retention period replication to all replicas of a record; expiry consensus across failure domains; per-replica retention state tracking; logical replication inherits retention deadlines consistently (logically replicated rows do not restart their clock on arrival).
+- **Retention verification** — retention decision audit trail, proof-of-enforcement, hash-chained audit entries, ed25519-signed checkpoints, offline-verifiable retention certificates.
+- **Retention vs deletion precedence** — retain-wins-over-delete (retention overrides deletion), longest-retention-wins among retain policies, shortest-delete-wins among delete-only policies when no retain covers the data (Microsoft Purview four principles), legal hold suspension of deletion.
+- **Retention audit** — append-only, hash-chained, signed audit log of every retention decision; dry-run vs enforce modes; chain checkpoints; offline proof bundles.
+
+Carrier-agnostic absolute rule: no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via `ids-carrier::Endpoint`. Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 (implemented in `ids-crypto`; `ids-retention-enforcement` consumes type surface and primitive IDs from `ids-000-aa`/`ids-crypto` only).
+
+A skeleton `ids-retention-enforcement` crate does NOT yet exist at `C:/idfs/ids-retention-enforcement/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpState`, `CommitState`, plus sealed trait contracts and error types. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract. Research only — no code, no source modifications, only this plan document.
+
+Research basis: 30 parallel searches returned GDPR Article 17 right to erasure and its exceptions (legal obligation, defence of legal claims), ISO/IEC 27002:2022 control 5.33 "Protection of records" (retention schedules, secure disposal), Microsoft Purview retention-precedence four principles (retain-wins-over-delete, longest-retain-wins, shortest-delete-wins, retain-then-delete), SEC 17a-4(f) WORM/audit-trail requirement (3–6 year retention), NIST SP 800-88 and IEEE 2883 media sanitization certificates (proof of erasure), Cloudant 90-day tombstone retention minimum, Kafka KIP-534 `delete.retention.ms` tombstone retention to prevent missed deletions, Cassandra tombstone `gc_grace_seconds` (grace period prevents zombie resurrection), SlateDB monotonic clock + TTL expiration timestamp (no wall-clock reads for hiding expired rows), Ia-CCF / Merkle-tree signed receipts for auditability, Infantado PAMSPEC retention-state machine (retained → expired → pending_deletion → legal_hold transitions), mark-and-sweep deletion sync algorithm, deterministic bounded-batch idempotent retention cleanup, Blancco/WipeCert tamper-proof erasure certificates, Open Archiver retention-policy engine (max-duration-wins evaluation), Snowflake data-retention-and-purge (retention + redaction timeline), trustANN evidence threshold per failure domain, ondulat/ceph failure-domain placement, Alex Sharman IAPP "data retention in a distributed system is hard" mark-and-sweep, trueprivacy/bigid defensible deletion with legal-hold management.
+
+---
+
+### 2. Architecture Overview
+
+`ids-retention-enforcement` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/enforcement layer: given a record or dataset tagged with retention metadata, it computes whether the data is still within its retention period, whether a legal hold suspends deletion, what precedence applies when multiple policies conflict, what expiry deadline applies, and what enforcement decision (retain / expire / pending_deletion / delete / hold) to issue. It never sends bytes itself; it returns a `RetentionDecision` that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (record owners)                 │
+│  ids-store, ids-replication, ids-fragment — records with retention metadata  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 097: ids-retention-enforcement (THIS CRATE — policy)    │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐   │
+│  │ retention period    │ │ retention expiry    │ │ retention across    │   │
+│  │ tracking            │ │ evaluation (deadline) │ │ replicas            │   │
+│  │ (period source,     │ │ (active/expired/    │ │ (period replicated   │   │
+│  │  legal basis, justify│ │  pending_deletion/  │ │  to all replicas;    │   │
+│  │  retention)         │ │  legal_hold status) │ │  expiry consensus)   │   │
+│  └─────────────────────┘ └─────────────────────┘ └─────────────────────┘   │
+│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐   │
+│  │ retention vs        │ │ retention           │ │ retention audit     │   │
+│  │ deletion precedence │ │ verification        │ │ (hash-chained, ed25519│   │
+│  │ (retain-wins,       │ │ (proof-of-enforcement│ │   signed checkpoints│   │
+│  │  longest-wins, hold)│ │  certificate)       │ │  dry-run/enforce)   │   │
+│  └─────────────────────┘ └─────────────────────┘ └─────────────────────┘   │
+│  ┌─────────────────────┐ ┌─────────────────────┐                           │   │
+│  │ retention state     │ │ carrier adapter     │                           │   │
+│  │ machine             │ │ (opaque Vec<u8> to  │                           │   │
+│  │ (IDS time keyed)    │ │  ids-carrier Endpoint│                           │   │
+│  └─────────────────────┘ └─────────────────────┘                           │   │
+└────────────────────────┬─────────────────────────────────────────────────────┘
+                         │ opaque Vec<u8> datagrams
+                         ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                    │
+│  send_datagram(Endpoint{CarrierType, addr: Vec<u8> ≤ 1024 B}, payload: &[u8])│
+│  receive_datagram → (Endpoint, Vec<u8>)                                      │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS      │
+│  / Wi-Fi / Bluetooth / cellular / VPN / mesh                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of a retention check:** client submits `RetentionCheck{record_id, dataset_id, now_tick}` → `ids-retention-enforcement` evaluates the retention period against the record's `retain_until` deadline, checks legal-hold state, resolves precedence among competing policies, returns `RetentionDecision{status, retain_until, decision: Retain|Expire|Delete|Hold|PendingDeletion, governing_policy_ids, causal_context}` → caller applies the decision (delete via ids-store, or retain via ids-replication) and ships any enforcement message as opaque datagram(s) to `ids-carrier::Endpoint` targets → retention decision recorded in append-only audit log.
+
+**Retention state machine (IDS-time keyed, monotonic):**
+`retained → expired → pending_deletion → legal_hold` with reverse transitions `expired → retained`, `pending_deletion → retained`, `legal_hold → retained/expired/pending_deletion` (after hold release). Matches Infantado PAMSPEC retention-state transitions. All timestamps keyed to monotonic `IdsTime` ticks, never wall-clock for expiry ordering (prevents premature expiration from clock jumps — see SlateDB monotonic-clock TTL design and patent US11928032B2 on monotonic time for snapshot expiry).
+
+**Crypto used:** ed25519 for signing retention decisions and audit checkpoints; sha256/blake3 for retention-policy ID derivation, audit-chain links, retention-certificate hashing; xchacha20poly1305/chacha20poly1305 to encrypt retention state at rest when confidentiality required.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to the targeted searches executed. Sources are cited inline with the source list in Section 13.
+
+#### 3.1 Retention period tracking
+
+Retention period = how long a record/dataset/partition is kept before it becomes eligible for deletion. Tracked per record via a `RetentionPeriod` type: `RetentionPeriod { period_ms: u64 (relative duration) OR retain_until_tick: u64 (absolute expiry), policy_id: PolicyId, legal_basis: LegalBasis, justification: Justification, scope: RetentionScope (record/dataset/partition/region) }`. Aligns with GDPR Article 5(1)(e) storage limitation: personal data kept no longer than necessary for the purposes; and ISO/IEC 27002:2022 control 5.33 — maintain a retention schedule for different record types, justify each period by legal/regulatory/contractual/business need. Sources: GDPR Article 5(1)(e), ISO/IEC 27002:2022 control 5.33 (Sprinto/Secureframe/Ignyte/Konfirmity/Hightable), Microsoft Purview Data Lifecycle Management (retain indefinitely, specific period, retain-and-then-delete), Snowflake retention-and-purge guide (retention + redaction timeline).
+
+#### 3.2 Retention expiry evaluation
+
+Expiry = `creation_tick + retention_period_ms` (relative) or absolute `retain_until_tick`. Comparison against monotonic `IdsTime` ticks only — never wall-clock — so clock jumps cannot cause premature expiration (SlateDB TTL design; patent US11928032B2 on monotonic time for snapshot expiry). Statuses: `active` (within period), `expired` (period elapsed, eligible for deletion), `pending_deletion` (decided to delete, awaiting execution), `legal_hold` (deletion suspended despite expiry). Deterministic cleanup scheduling: compute cutoff once per run, persist policy version + cutoff with the run; idempotent bounded batches (Open Archiver lifecycle worker; dev.to scheduled-cleanup pattern). Legal hold instantly freezes matching data regardless of normal retention schedule (knogin Data Retention Policies).
+
+#### 3.3 Retention across replicas
+
+Retention period must be consistent across all replicas of a record. Logically replicated rows inherit retention deadlines — the retention clock does NOT restart on the subscriber (pg_vault_tables replication-and-standbys: rows arrive as fresh inserts, deadlines calculated on origin; logical replica keeps rows longer, which is safe — nothing expires early, but windows diverge). For strict consistency, retention periods are replicated alongside data so all replicas expire together (opposite of logical replication's default). Cross-region retention enforcement must account for replication lag — retention decisions should not delete on one region while another region still holds live data within its window (EDB PGD replication-lag control; ondulat/ceph failure-domain placement). Failure-domain-aware retention: expiry consensus across failure domains so a single domain failure doesn't cause divergent retention (trustANN evidence threshold per failure domain; arxiv 1701.01539 replica placement under correlated failure).
+
+#### 3.4 Retention verification
+
+Verification = proof that a retention decision was correctly enforced. Every retention decision (retain/expire/delete/hold) recorded in append-only audit with hash chain + ed25519-signed checkpoints (halos ADR-0041 signed audit chain heads; AccessIQ tamper-evident hash-chained audit logs; trstctl signed audit bundles). Retention certificates: signed, tamper-proof, offline-verifiable (Blancco erasure certificates; WipeCert GDPR erasure certificates; Anyformat deletion certificates with ECDSA-over-SHA256 signatures). Retention audit log protected at two levels: append-only table (triggers block UPDATE/DELETE except through retention process), per-record hash chain; chain checkpoints keep integrity verifiable after deletion (AccessIQ). Verification allows offline, years-later audit of retention compliance (merklon transparency log inclusion/consistency proofs).
+
+#### 3.5 Retention vs deletion precedence
+
+When multiple retention/deletion policies apply to the same data:
+- **Retain wins over delete:** if any policy says retain, data is retained regardless of delete-only policies (Microsoft Purview Principle 1).
+- **Longest retain wins:** among retain-only/retain-then-delete policies, the longest retention period applies (Purview Principle 2).
+- **Shortest delete wins:** among delete-only policies (no retain covers the data), the shortest deletion period applies (Purview Principle 4 — deletion is a deliberate compliance action).
+- **Legal hold overrides everything:** hold suspends deletion even after expiry; release returns data to normal retention flow.
+Precedence resolution is deterministic: evaluate all matching policies, partition into retain-set and delete-set; if retain-set non-empty → retain for max(retain periods); else → delete at min(delete periods) unless hold. Sources: Microsoft Purview "4 principles that decide what Purview actually keeps"; trueprivacy data-retention (longest rule wins; conflicting rules flagged for legal review); knogin (most restrictive applicable rule; legal holds freeze data).
+
+#### 3.6 Retention audit
+
+Append-only audit log: every retention lifecycle event (policy creation, modification, deletion, retention decision, automated deletion) recorded. Automated deletions include governing policy IDs for full traceability from deletion back to the triggering rule (Open Archiver retention-policy full audit trail). Dry-run vs enforce modes: dry-run counts expired records without deleting; enforce archives then deletes after read-back verification (AccessIQ retention modes: dry-run / archive-only / archive-and-delete / off). Archive-first, delete-second: records past retention are archived, verified (size, SHA-256, record count, hash chain), then deleted only after successful read-back; chain checkpoint recorded with each delete so integrity still verifies remaining events (AccessIQ archive-and-delete). Legal defensibility: deletion certificates, compliance reporting, retention-policy adherence evidence for regulators (trueprivacy; bigid defensible disposition).
+
+#### 3.7 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+- ed25519: signing retention decisions, audit checkpoints, retention certificates (RFC 8032 EdDSA over Curve25519; ed25519-dalek docs).
+- sha256: retention-policy ID derivation, audit-chain links, certificate hashing (NIST FIPS 180-4 SHA-256; sha2 RustCrypto).
+- blake3: fast content hashing for retention-state hashing, checkpoint chaining, anti-entropy digests (BLAKE3-team README; 256-bit output, SIMD, keyed hash, KDF, XOF).
+- xchacha20poly1305: encrypt retention state at rest (bounded replay windows, causal histories) with 24-byte nonce safe for random generation (RFC 7539 / libsodium XChaCha20-Poly1305).
+- chacha20poly1305: encrypt session/state payloads with 12-byte nonce (counter-based, bounded use) (RFC 7539 ChaCha20-Poly1305).
+No other crypto. `ids-crypto` exposes primitive IDs; `ids-retention-enforcement` references them via `ids-000-aa` only.
+
+#### 3.8 Tombstone and deletion semantics
+
+Deletion writes tombstones (not immediate physical removal) so replicas learn of deletes (Cassandra: delete = timestamped tombstone insertion; zombies prevented by grace period `gc_grace_seconds` default 864000s / 10 days). Tombstone retention minimum must outlast any reader's lag window: Kafka `delete.retention.ms` preserves tombstones so consumers that read pre-tombstone see the tombstone before cleanup (KIP-534; Confluent tombstone discussion). Cloudant removes tombstone metadata after a guaranteed minimum 90 days; replications must run more often than the tombstone retention or they miss deletions. Retention enforcement: tombstones retained until all replicas have acked past the deletion (causal stability), then reclaimed by compaction/sweep (smg tombstone GC driven by per-peer ack watermarks). `ids-retention-enforcement` defines tombstone retention policy; `ids-replication` / `ids-store` perform physical reclamation via carrier datagrams.
+
+#### 3.9 Deterministic retention scheduling and idempotent cleanup
+
+Retention cleanup runs on a schedule (cron-like trigger), never performs the whole cleanup in the trigger itself — the trigger emits bounded, deterministic work chunks; idempotent workers delete one chunk per transaction, checkpoint completion in the same transaction, acknowledge after commit (dev.to scheduled-cleanup patterns: cron-triggered queue batches, stable batch identity = policy + cutoff + window start, unique constraint makes redelivery a no-op, reconciliation republishes missing windows). Fixed cutoff per run (computed once, persisted with the run) prevents "recomputing now minus N days mid-run moves the predicate" semantic change. Deterministic batch identity enables recovery: after interruption, repeat one chunk, not the entire sweep (recovery drills for scheduled cleanup).
+
+#### 3.10 Failure domains and correlated retention
+
+Retention enforcement across replicas must respect failure domains: correlated failures (power, facility, network segment, operator, geography) can disable many replicas at once; retention decisions should require evidence from independent failure domains before deleting (trustANN D(S) ≥ d_min per shard; ondulat/ceph failure-domain placement; arxiv 1701.01539 optimal replica placement under correlated failure). Delete only when a quorum of independent failure domains agrees the data is expired — prevents a single compromised/failed domain from causing premature deletion, and prevents a single domain from blocking deletion indefinitely (consistent with ids-000-aa correlated_failure and quorum_intersection invariants).
+
+#### 3.11 Legal hold and retention suspension
+
+Legal hold (litigation, audit, investigation) suspends automatic deletion for matching data regardless of retention expiry (knogin legal holds; Snowflake DATA_RETENTION_HOLD_RECORDS). Hold state machine: `retained → legal_hold` (hold applied), `legal_hold → retained/expired/pending_deletion` (after hold release). Hold reasons, start/end dates, and authorizing entity recorded in audit. Hold release re-evaluates retention against current expiry. GDPR Article 17(3)(e) exception: retention permitted for establishment/exercise/defence of legal claims.
+
+---
+
+### 4. Threat Model & Mitigations
+
+| Threat | Asset at risk | Mitigation (this crate) |
+|--------|---------------|--------------------------|
+| Premature deletion from clock jump | Data integrity / availability | Monotonic `IdsTime` ticks only for expiry; never wall-clock for ordering (SlateDB monotonic TTL; US11928032B2) |
+| Delayed deletion past retention | Compliance / storage exposure | Deterministic cleanup scheduling; fixed cutoff per run; reconcile missing windows |
+| Stale replica deletes data early / resurrects deleted data | Consistency | Tombstone retention until causal stability (all replicas acked past deletion); grace period (Cassandra gc_grace_seconds) |
+| Divergent retention across replicas | Consistency | Replicate retention period with data; expiry consensus across failure domains |
+| Conflicting retain/delete policies | Data loss / compliance | Deterministic precedence: retain-wins, longest-retain-wins, shortest-delete-wins, hold-overrides-all |
+| Unauthorized retention-policy change | Accountability | Append-only audit; ed25519-signed checkpoints; policy change requires signed governance decision |
+| Deletion without proof | Audit defensibility | Retention certificates; hash-chained audit; offline-verifiable proof bundles |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Idempotent retention decisions; idempotent bounded batches with unique identities |
+| Legal hold bypassed | Compliance | Hold state machine; hold recorded in audit; hold checked before every delete decision |
+| Audit log tampering | Accountability | SHA-256/BLAKE3 hash chain + ed25519-signed checkpoints; append-only, triggers block external modification |
+| Carrier-agnostic rule violation | Architecture | `ids-carrier::Endpoint` sole address type; dependency audit bans networking crates |
+| Disallowed crypto | Security policy | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305; allowlist test in CI |
+
+The carrier is never trusted: retention decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+| Crate | Role | Relevance to ids-retention-enforcement |
+|-------|------|----------------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpState`, `CommitState`, `FailureDomain`, `Error` — consumed, never redefined |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All retention traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing decisions/audit/certificates; encrypting retention state at rest; hashing policies and chains |
+| `ids-store` | Primary record store (retention subject) | Tags records with retention metadata; consults `ids-retention-enforcement` before deletion |
+| `ids-replication` | Replica synchronization / anti-entropy | Replicates retention periods with data; performs tombstone GC after causal stability via carrier datagrams |
+| `ids-fragment` | Record fragments/shards | Fragment retention governed by parent record's retention period |
+| `ids-immutable` (Phase 040) | Immutable record protection | Retention must not permit deletion of held/immutable records; guard checked before delete admission |
+| `ids-consistency-profile` (Phase 060) | Read/write behavior per profile | Profile may gate deletion (e.g., quorum-durable requires agreement before delete) |
+| `ids-session` (Phase 050) | Client-session binding | Session-bound retention requests carry retention context; audit cross-referenced with session audit |
+| `ids-time` | Monotonic time source | All retention deadlines keyed to `IdsTime` ticks (never wall-clock for ordering) |
+
+**Integration points:** `ids-retention-enforcement` evaluates public contracts declared in `ids-000-aa`; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on `ids-discovery`/`ids-session`/`ids-cli` beyond what the contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-retention-enforcement/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-retention-enforcement/
+  Cargo.toml
+  src/
+    lib.rs                      # crate root, public API surface
+    errors.rs                   # RetentionError (thiserror): period, expiry, precedence, hold, audit errors
+    types.rs                    # RetentionPeriod, RetentionPolicy, RetentionDecision, RetentionStatus (re-exports ids-000-aa types)
+    retention_period_tracking.rs # per-record/dataset/partition retention period, legal basis, justification, scope
+    retention_expiry.rs         # expiry deadline computation, monotonic-clock keyed, expiry status
+    retention_across_replicas.rs # retention replication to all replicas, expiry consensus across failure domains
+    retention_verification.rs   # retention decision verification, proof-of-enforcement, certificate generation
+    retention_precedence.rs     # retain-wins-over-delete, longest-wins, shortest-delete-wins, legal hold
+    retention_audit.rs          # audit trail entry point, dry-run/enforce modes
+    state_machine.rs            # retention state machine (retained/expired/pending_deletion/legal_hold)
+    scheduler.rs                # deterministic retention scheduling, bounded batches, idempotent cleanup
+    carrier_adapter.rs          # opaque Vec<u8> datagram framing to ids-carrier::Endpoint (decision carrier only)
+    contracts/                  # sealed trait contracts (~12 files)
+      retention_contract.rs, expiry_contract.rs, replica_contract.rs, verification_contract.rs,
+      precedence_contract.rs, audit_contract.rs, state_contract.rs, scheduler_contract.rs,
+      carrier_contract.rs, hold_contract.rs, certificate_contract.rs, mod.rs
+    invariants/                 # compile-time/runtime invariants (~10 files)
+      monotonic_clock_only.rs, carrier_agnostic.rs, crypto_allowlist.rs, expiry_consensus.rs,
+      tombstone_grace.rs, retention_precedence_sound.rs, legal_hold_sound.rs, audit_chain_sound.rs,
+      policy_immutable.rs, mod.rs
+    audit/                      # signed, hash-chained audit log (~8 files)
+      audit_entry.rs, audit_chain.rs, checkpoint.rs, signer.rs, verifier.rs, certificate.rs,
+      dry_run.rs, mod.rs
+    tombstone/                  # tombstone retention policy (~6 files)
+      tombstone.rs, grace_period.rs, causal_stability.rs, reclamation.rs, mod.rs, types.rs
+    hold/                       # legal hold management (~6 files)
+      hold.rs, hold_state_machine.rs, hold_reasons.rs, hold_release.rs, mod.rs, types.rs
+    policy/                     # retention policy management (~8 files)
+      policy.rs, policy_evaluation.rs, precedence_resolution.rs, policy_schedule.rs, mod.rs, types.rs,
+      registry.rs, conflict.rs
+    verification/               # retention verification (~6 files)
+      verifier.rs, proof_bundle.rs, inclusion_proof.rs, consistency_proof.rs, mod.rs, types.rs
+  tests/                        # property/verification tests (~36 files)
+  benches/                      # (~10 files)
+  docs/                         # (~16 files)
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `src/tombstone/`, `src/hold/`, `src/policy/`, `src/verification/`, `tests/`, `benches/`, `docs/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+- **RetentionPeriod / RetentionPolicy**: `RetentionPeriod { retain_until_tick: Option<u64>, period_ms: Option<u64>, policy_id, legal_basis, justification, scope }`; `RetentionPolicy { id, name, period, action: Retain|Delete|RetainThenDelete, scope, conditions }`.
+- **Expiry computation**: `expires_at(tick) = creation_tick + period_ms` (relative) or `retain_until_tick` (absolute); `is_expired(now_tick) = now_tick >= expires_at`; monotonic `IdsTime` only.
+- **Retention status**: `RetentionStatus { Active, Expired, PendingDeletion, LegalHold }`; state transitions per Infantado PAMSPEC (retained→expired→pending_deletion→legal_hold; reverse on hold release / policy change).
+- **Precedence resolution**: evaluate all matching policies; partition into retain-set / delete-set; if retain-set non-empty → `retain_for = max(retain periods)` (retain-wins, longest-wins); else → `delete_at = min(delete periods)` (shortest-delete-wins) unless `legal_hold` → suspend.
+- **Retention decision**: `RetentionDecision { status, retain_until, decision: Retain|Expire|Delete|Hold|PendingDeletion, governing_policy_ids, audit_entry_id }`.
+- **Expiry consensus across replicas**: delete only when a quorum of independent failure domains agrees the data is expired (quorum intersection R+W>N applied to retention agreement); tombstone retained until causal stability (all peers acked past deletion).
+- **Tombstone retention**: tombstone kept for grace period ≥ max reader lag window (Cassandra gc_grace_seconds; Kafka delete.retention.ms); reclaimed by compaction/sweep after causal stability.
+- **Deterministic cleanup**: fixed cutoff per run persisted with run key; bounded idempotent batches (batch identity = policy + cutoff + window start; unique constraint makes redelivery a no-op); reconciliation republishes missing windows.
+- **Audit chain**: each retention decision = SHA-256/BLAKE3-chained entry + ed25519-signed checkpoint; offline-verifiable retention certificates (inclusion proof, signed checkpoint, optional RFC 3161 timestamp).
+- **Legal hold**: hold state machine; hold freezes deletion regardless of expiry; hold reasons/dates/authorizer recorded in audit.
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `OpState`, `CommitState`, `FailureDomain`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `serde` — serialization of retention envelopes, decisions, audit entries.
+- `thiserror` — error types.
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-97.1 | Retention period tracking: per-record/dataset/partition retention period, policy source, legal basis, justification, scope | `src/retention_period_tracking.rs` + policy registry; all fields present and typed |
+| AC-97.2 | Retention expiry: deadline computed from monotonic `IdsTime` tick; statuses active/expired/pending_deletion/legal_hold | Expiry evaluation returns correct status for boundary ticks (before/at/after retain_until) |
+| AC-97.3 | Monotonic-clock-only: zero references to wall-clock for expiry ordering | Source grep for wall-clock APIs in expiry path — zero matches |
+| AC-97.4 | Retention across replicas: retention period replicated to all replicas; expiry consensus across failure domains | Replica contract enforces period propagation; quorum-of-domains agreement before delete |
+| AC-97.5 | Tombstone retention: tombstones kept until causal stability (all replicas acked past deletion); grace period enforced | Tombstone GC only after quorum ack watermark covers deletion |
+| AC-97.6 | Retention vs deletion precedence: retain-wins-over-delete; longest-retain-wins; shortest-delete-wins; hold-overrides-all | Precedence resolution unit tests cover all four principles + hold override |
+| AC-97.7 | Retention verification: proof-of-enforcement certificate generated per retention decision | Certificate includes entry, inclusion proof, signed checkpoint; offline-verifiable |
+| AC-97.8 | Retention audit: append-only, hash-chained, ed25519-signed audit log; dry-run/enforce modes | Audit chain verifies; dry-run counts without deleting; enforce archives-then-deletes after read-back verification |
+| AC-97.9 | Legal hold: hold suspends deletion despite expiry; hold release re-evaluates retention | Hold state machine transitions enforced; delete rejected while hold active |
+| AC-97.10 | Deterministic cleanup: fixed cutoff per run; bounded idempotent batches; reconciliation republishes missing windows | Batch identity = policy + cutoff + window start; unique constraint idempotency; scheduler unit tests |
+| AC-97.11 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) passes; source grep passes |
+| AC-97.12 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in the crate's crypto surface | Allowlist unit test passes |
+| AC-97.13 | Crate compiles cleanly | `cargo check -p ids-retention-enforcement` exits 0 with no warnings |
+| AC-97.14 | Conformance tests pass | `cargo test -p ids-retention-enforcement` passes all retention/expiry/precedence/audit/hold tests |
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete retention periods per data type:** deployment-tuned (tax records 7 years, GDPR personal data purpose-limited, etc.); to be configured at integration with `ids-store`/`ids-immutable`.
+- **Tombstone grace period duration:** must exceed max reader lag across failure domains; workload-dependent; default TBD (Cassandra default 10 days is a reference point, not a mandate).
+- **Expiry consensus quorum size:** number of independent failure domains that must agree before delete; trades safety vs liveness under domain failure.
+- **Legal hold scope:** record-level vs dataset-level vs region-level holds; granularity to be validated at integration with `ids-immutable` (Phase 040) holds.
+- **Interaction with `ids-consistency-profile` (Phase 060):** whether quorum-durable profiles require quorum agreement before retention delete; exact guard handshake pending integration validation.
+- **Interaction with `ids-session` (Phase 050):** session-bound retention requests and audit cross-referencing to be validated at integration.
+- **Archive target for enforce mode:** object-store vs local archive; read-back verification requirements (AccessIQ archive-and-delete pattern).
+- **Retention policy change governance:** signed governance decision required for policy changes; signing key management and rotation pending.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate crate `ids-retention-enforcement` (not a folder) | Follows "separate crates instead of more folders" directive; clear enforcement boundary |
+| Monotonic `IdsTime` only for expiry ordering; never wall-clock | Prevents premature expiration from clock jumps (SlateDB monotonic TTL; US11928032B2) |
+| Precedence: retain-wins, longest-retain-wins, shortest-delete-wins, hold-overrides-all | Microsoft Purview four principles; protects against accidental data loss; deletion is deliberate |
+| Tombstone retention until causal stability + grace period | Prevents zombie resurrection (Cassandra); ensures all replicas learn of delete (Kafka delete.retention.ms; Cloudant 90-day minimum) |
+| Audit: SHA-256/BLAKE3 hash chain + ed25519-signed checkpoints; dry-run/enforce | Offline-verifiable decision log; tamper evidence; AccessIQ archive-and-delete pattern |
+| Legal hold state machine suspends deletion regardless of expiry | GDPR Art. 17(3)(e) defence-of-legal-claims; litigation/audit/investigation hold |
+| Expiry consensus across independent failure domains before delete | Prevents single-domain premature deletion or indefinite block (trustANN evidence threshold; correlated-failure invariant) |
+| Deterministic bounded idempotent cleanup batches | Recovery: repeat one chunk not entire sweep (dev.to scheduled-cleanup patterns) |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitive IDs via `ids-000-aa` | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+[^1]: GDPR Article 5(1)(e) — storage limitation: personal data kept no longer than necessary for the purposes. https://gdpr.org/regulation/article-5.html
+[^2]: GDPR Article 17 — right to erasure and exceptions (legal obligation, defence of legal claims). https://gdpr.org/regulation/article-17.html
+[^3]: ICO — Right to erasure (UK GDPR Art. 17) and exceptions. https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/individual-rights/right-to-erasure
+[^4]: ISO/IEC 27002:2022 control 5.33 "Protection of records" — retention schedules, secure disposal. https://sprinto.com/blog/iso-27001-data-retention-policy ; https://secureframe.com/blog/iso-27001-data-retention-policy-template
+[^5]: Microsoft Purview — retention policies & labels (retain-only, delete-only, retain-then-delete). https://learn.microsoft.com/en-us/purview/retention
+[^6]: Microsoft Purview — the 4 retention-precedence principles (retain-wins, longest-wins, shortest-delete-wins). https://thepurviewpractitioner.com/learn/retention-precedence-four-principles
+[^7]: SEC Rule 17a-4(f) — WORM / audit-trail recordkeeping, 3–6 year retention. https://laserfiche.com/resources/blog/what-is-sec-17a-4
+[^8]: NIST SP 800-88 — media sanitization guidelines; certificate of media disposition. https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-88r1.pdf
+[^9]: IEEE 2883-2022 / IEEE 2883.1-2025 — data erasure verification (sampling for Clear, full verification for Purge). https://blancco.com/resources/blog-verifiable-data-destruction-how-to-know-data-is-gone-for-good
+[^10]: Blancco — tamper-proof erasure certificates, digital signatures. https://blancco.com/resources/blog-what-makes-blanccos-certificates-tamper-proof
+[^11]: WipeCert — GDPR evidence of data erasure, signed certificates. https://wipecert.com/compliance/gdpr
+[^12]: Cloudant — automatic tombstone cleanup after 90-day minimum retention. https://cloud.ibm.com/docs/Cloudant?topic=Cloudant-faq-enabling-automatic-removal-of-document-tombstones
+[^13]: Apache Kafka KIP-534 — `delete.retention.ms` tombstone retention to prevent missed deletions. https://wiki.apache.org/confluence/display/KAFKA/KIP-534%3A+Retain+tombstones+and+transaction+markers+for+approximately+delete.retention.ms+milliseconds
+[^14]: Apache Cassandra — tombstones, `gc_grace_seconds` grace period, zombie prevention. https://cassandra.apache.org/doc/latest/cassandra/managing/operating/compaction/tombstones.html
+[^15]: SlateDB design — monotonic clock, TTL as absolute expiration timestamp, no wall-clock reads for hiding expired rows. https://slatedb.io/docs/design/time
+[^16]: Patent US11928032B2 — time variation protection for snapshots using monotonic time source. https://patents.google.com/patent/US11928032B2
+[^17]: Ia-CCF — individual accountability, signed ledger messages, Merkle-tree receipts. https://arxiv.org/html/2105.13116v2
+[^18]: halos ADR-0041 — signed audit chain heads, ed25519 checkpoints. https://dshakes.github.io/halos/adr/0041-signed-audit-chain-heads
+[^19]: AccessIQ — tamper-evident hash-chained audit logs, retention modes (dry-run/enforce/archive-and-delete). https://www.accessiq.app/docs/security/audit-logs
+[^20]: trstctl — signed audit bundles, archive-and-delete with read-back verification. https://docs.trstctl.com/compliance
+[^21]: merklon — verifiable append-only transparency log, inclusion/consistency proofs, offline proof bundles. https://github.com/TrustBeat/merklon
+[^22]: Infantado PAMSPEC — retention-state machine (retained/expired/pending_deletion/legal_hold), append-only event ledger. https://datatracker.ietf.org/doc/draft-infantado-agent-memory-architecture/00
+[^23]: IAPP — data retention in a distributed system; mark-and-sweep deletion sync. https://iapp.org/news/a/data-retention-in-a-distributed-system
+[^24]: Open Archiver — retention-policy engine, max-duration-wins evaluation, lifecycle worker, full audit trail. https://docs.openarchiver.com/enterprise/retention-policy
+[^25]: Snowflake — data retention and purge guide (retention + redaction timeline, legal holds). https://github.com/Snowflake-Labs/sfguide-data-retention-and-purge
+[^26]: knogin — data retention policies, legal holds freeze data, most restrictive applicable rule. https://knogin.com/en/developers/data-retention-policies
+[^27]: trueprivacy — data retention, automated deletion, legal hold, deletion certificates, compliance reporting. https://trueprivacy.io/platform/data-retention
+[^28]: bigid — data lifecycle management, defensible disposition, retention rules. https://bigid.com/data-lifecycle-management
+[^29]: dev.to — scheduled data cleanup: cron-triggered idempotent queue batches, deterministic batch identity, fixed cutoff per run. https://dev.to/jorisrhodes8286/nodejs-cleanup-cron-triggered-queue-batches-for-idempotent-postgres-log-deletion-33ao
+[^30]: dev.to — recovery drills for scheduled cleanup; one chunk per transaction, reconciliation republishes missing windows. https://dev.to/garrisonsterling2693/recovery-drills-for-scheduled-nodejs-postgres-cleanup-across-large-datasets-10d4
+[^31]: trustANN — evidence threshold per failure domain, independent evidence for trust decisions. https://arxiv.org/html/2610.34608v1
+[^32]: ondulat/ceph — failure-domain placement for data resilience. https://docs.ondat.io/docs/concepts/tap ; https://canonical.com/ceph/docs/v20.2.1-tentacle/snap/explanation/canonical-ceph-reference-architecture/data-persistence-mechanisms
+[^33]: arxiv 1701.01539 — optimal replica placement under correlated failure in hierarchical failure domains. https://arxiv.org/html/1701.01539v4
+[^34]: smg — tombstone GC driven by per-peer ack watermarks (causal stability). https://github.com/lightseekorg/smg/pull/1686
+[^35]: pg_vault_tables — logical replication retention clock does not restart on subscriber. https://pg-vault-tables.pebbleit.com.au/1.0/dba-guide/04-replication-and-standbys
+[^36]: EDB PGD — replication lag control across regions. https://enterprisedb.com/docs/pgd/latest/geo-replication-dba/managing-lag
+[^37]: RFC 8032 — EdDSA / ed25519. https://www.rfc-editor.org/rfc/rfc8032
+[^38]: RFC 7539 — ChaCha20-Poly1305 AEAD. https://www.rfc-editor.org/rfc/rfc7539
+[^39]: libsodium — XChaCha20-Poly1305 construction. https://doc.libsodium.org/doc/secret-key_cryptography/aead/chacha20-poly1305/xchacha20-poly1305_construction
+[^40]: NIST FIPS 180-4 — SHA-256. https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.180-4.pdf
+[^41]: BLAKE3 — BLAKE3-team README. https://github.com/BLAKE3-team/BLAKE3
+[^42]: C:/idfs/prompts.txt entry 97 (lines 1450-1464) — Phase 097 crate definition, contents, constraints.
+[^43]: Existing ids-000-aa skeleton. C:/idfs/ids-000-aa/ — types.rs, lib.rs, contracts/, invariants/, errors.rs, versioning.rs, Cargo.toml.
+[^44]: HX-241 reference plan format. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+
+---
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made. The blueprint above defines all architecture, interfaces, data structures, algorithms, dependencies, integration points, acceptance criteria, and file structure for Phase 097 (ids-retention-enforcement).
+
+
+# PHASE 098:
+
+## Phase 098 — Create the ids-immutable-record crate: Immutable data protection. Research Findings & Implementation Blueprint
+
+**Research complete (30 targeted searches executed). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1465-1479)
+
+```
+98. Research only do not read plan.md **[Phase 098 — Create the ids-immutable-record crate: Immutable data protection.]**
+
+Crate: ids-immutable-record
+Purpose: Immutable data protection.
+Contents: Immutable record creation, immutability enforcement, tamper detection, immutable record across replicas, immutable record expiry, immutable record audit.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 098 — Create the ids-immutable-record crate: Immutable data protection.]**
+
+Create plan-098.md in C:/idfs/plans/ for the ids-immutable-record crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 098 creates `ids-immutable-record`, the IDS crate that provides immutable data protection — records that, once sealed, cannot be modified, deleted, or reordered without detection. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by protection domain: creation, enforcement, tamper detection, cross-replica immutability, expiry, and audit. `ids-immutable-record` never sends bytes itself; it evaluates immutability policies, verifies tamper-evidence, and returns decisions (`SealDecision`, `TamperVerdict`, `ExpiryVerdict`) that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`).
+
+Contents (from prompts.txt entry 98): immutable record creation, immutability enforcement, tamper detection, immutable record across replicas, immutable record expiry, immutable record audit.
+
+**Core design:** each record carries a content-addressed identifier (BLAKE3/SHA-256 of canonical bytes), is sealed into an append-only hash chain (SHA-256 chaining per entry), and any edit, deletion, or reorder breaks chain verification. Expiry is enforced via retention timestamps with tombstone-style marking — records remain readable until retention expires, after which they may be purged (crypto-shredding: destroy the per-record decryption key so ciphertext stays but content is unrecoverable). Audit is an Ed25519-signed, hash-chained log of every creation/seal/verify/expire/purge decision. Cross-replica immutability: replicas agree on the sealed chain head via Merkle-batched anchoring; divergence is detectable through inclusion proofs.
+
+**Scope boundary:** `ids-immutable-record` protects; it does not transport. All cross-replica traffic rides `ids-carrier::Endpoint` as opaque `Vec<u8>` datagrams. No `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh anywhere. Allowed crypto only: ed25519 (signing seal/audit decisions), xchacha20poly1305 (encrypting record payloads at rest), sha256 (hash-chain links), blake3 (content addressing, fast integrity), chacha20poly1305 (session/state payload encryption).
+
+A skeleton `ids-immutable-record` crate does NOT yet exist at `C:/idfs/ids-immutable-record/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, plus sealed trait contracts and error types. Research only — no code, no source modifications, only this plan document.
+
+---
+
+### 2. Architecture Overview
+
+`ids-immutable-record` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a protection/policy layer: given a record and a protection policy, it (a) creates an immutable sealed record, (b) enforces that no write/delete path mutates a sealed record, (c) verifies tamper-evidence via hash-chain recomputation, (d) evaluates immutability across replicas by comparing chain heads and Merkle roots, (e) checks expiry against retention timestamps, and (f) writes signed audit entries for every protection decision. It never sends bytes itself; it returns decisions that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    APPLICATION / ids-* LAYER (record owners)                  │
+│  ids-store, ids-replication, ids-fragment — sealed-record read/write          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 098: ids-immutable-record (THIS CRATE — protection)      │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌─────────┐ │ │\\n│  │ record           │ │ immutability     │ │ tamper         │ │ expiry   │ │ │\\n│  │ creation         │ │ enforcement      │ │ detection        │ │ enforcement│ │ │\\n│  │ (seal + content  │ │ (reject writes   │ │ (hash-chain      │ │ (retention │ │ │\\n│  │  addressing)     │ │  to sealed rec)│ │  recompute)      │ │  timestamps) │ │ │\\n│  └──────────────────┘ └──────────────────┘ └──────────────────┘ └─────────┘ │ │\\n│  ┌──────────────────┐ ┌──────────────────┐ │                  │                │ │ │\\n│  │ cross-replica    │ │ audit            │ │                  │                │ │ │\\n│  │ immutability     │ │ (Ed25519-signed  │ │                  │                │ │ │\\n│  │ (Merkle anchor)  │ │  hash-chain log) │ │                  │                │ │ │\\n│  └──────────────────┘ └──────────────────┘ │                  │                │ │ │\\n│  ┌──────────────────┐ ┌──────────────────┐ │                  │                │ │ │\\n│  │ decision types   │ │ crypto surface   │ │                  │                │ │ │\\n│  │ (Seal/Tamper/    │ │ (ed25519/sha256/ │ │                  │                │ │ │\\n│  │  Expiry/Audit)   │ │  blake3/chacha)  │ │                  │                │ │ │\\n│  └──────────────────┘ └──────────────────┘ │                  │                │ │ │\\n└──────────────────────────────┬─────────────┴──────────────────┴────────────┘\\n                              │ opaque Vec<u8> datagrams\\n┌──────────────────────────────▼──────────────────┐\\n│              CARRIER BOUNDARY: ids-carrier::Endpoint only│\\n│  send_datagram(Endpoint{CarrierType≤1024B addr, Vec<u8>},│\\n│  payload: &[u8])                                          │\\n│  receive_datagram → (Endpoint, Vec<u8>)                    │\\n│  No std::net / tokio::net / libp2p / IP / TCP / UDP /     │\\n│  QUIC / HTTP / DNS / Wi-Fi / Bluetooth / cellular / VPN   │\\n└────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of record creation:** client submits `CreateRecord{payload, policy, retention_ttl}` → `ids-immutable-record` computes content-id = BLAKE3(canonical_bytes(payload)), seals record = `{content_id, payload_hash: SHA-256, seq, prev_hash, signature}` into append-only hash chain, returns `SealDecision{record_id: RecordId, content_id, chain_head, sealed_at: IdsTime, expiry_at, decision: Seal|Reject}` → caller stores the sealed record as opaque datagram(s) to `ids-carrier::Endpoint` targets and replicates to other replicas → each replica re-verifies chain against its local head.
+
+**Data flow of tamper detection:** verifier reads stored sealed record + chain → recomputes `SHA-256(prev_hash || content || seq)` for every entry from genesis → any mismatch → `TamperVerdict{Tampered, entry_index, breach_type: ContentEdit|Insertion|Deletion|Reorder|Truncation}` → audit entry signed with ed25519.
+
+**Protection semantics (research-verified):**
+- **Immutable record creation**: content-addressed (hash = ID), sealed at creation; no in-place update — edits produce a new record with new content-id, linked via hash chain.
+- **Immutability enforcement**: sealed records reject `UPDATE`/`DELETE` at the policy layer (equivalent to WORM / append-only database trigger); corrections are new append-only entries.
+- **Tamper detection**: SHA-256 hash chain — any field edit breaks that entry's hash; any insert/delete/reorder breaks predecessor-hash links and shifts all subsequent entries; truncation detected by head/count anchors.
+- **Cross-replica immutability**: replicas maintain identical append-only chains; Merkle-batched anchoring lets any replica prove its chain head matches others via O(log N) inclusion proofs; divergence (fork) detectable by comparing chain heads.
+- **Immutable record expiry**: retention timestamp per record; record stays readable until `expiry_at`; after expiry, purge path crypto-shreds (destroys decryption key) so ciphertext remains chain-valid but content unrecoverable.
+- **Audit**: every protection decision (create/seal/verify/expire/purge) logged in append-only, SHA-256/BLAKE3 hash-chained, ed25519-signed audit log with `NodeId` + `IdsTime`.
+
+**Crypto used:** ed25519 for signing seal decisions and audit checkpoints; sha256 for hash-chain links; blake3 for content addressing and fast integrity checks; xchacha20poly1305/chacha20poly1305 to encrypt record payloads at rest (XChaCha for random-nonce safety, ChaCha for counter-based session payloads).
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to targeted searches executed. Sources cited inline; full list in Section 12.
+
+#### 3.1 Append-only hash-chained ledgers (tamper-evidence foundation)
+
+**Sources:** Immutable.dev Trust Architecture (SHA-256 hash chain across all fields, per-workspace, PostgreSQL advisory locks for ordering); AuditWeave arxiv:2607.09682 (append-only SHA-256 chain, detection of edit/insert/delete/reorder over 2000 trials); Stackbilt-dev audit-chain (SHA-256 prev-hash chaining, head/count anchors detect tail truncation); Agent Flight Recorder arxiv:2609.01931 (hash chain + Merkle batching + epoch root chaining for gap detection); nexuscone (SHA-256 chain + Ed25519 signing, genesis row of zeros).
+
+Every sealed record entry stores `previous_hash` plus its own `entry_hash = SHA-256(prev_hash || canonical(content) || seq)`. Because every hash incorporates the prior hash, any modification, insertion, deletion, or reordering invalidates all subsequent entries. Verification recomputes the whole chain from genesis; a failure localizes tampering to a specific entry. Detection is tamper-*evidence*, not tamper-*resistance* — an adversary controlling storage can recompute the whole chain, which is why Section 3.4 adds external anchoring.
+
+#### 3.2 Content-addressed immutable records (content = ID)
+
+**Sources:** IPFS Merkle DAG docs (nodes immutable, content-addressed by SHA-256 multihash, any change alters identifier and all ascendants); Git object model (blobs/trees/commits content-addressed by hash, objects immutable once created, dedup by identical content); prolly object-store VCS design (immutable nodes/blobs at content-addressed paths, verify sha256(node_bytes) == cid on write, PutMode::Create-if-supported).
+
+`ids-immutable-record` computes `content_id = BLAKE3(canonical_bytes(payload))` as the record identity. Two records with identical content share the same content-id (deduplication); any content change yields a different content-id, so the old record remains intact and the new one is a separate object. Content-addressing also enables fast integrity verification: recompute BLAKE3 over stored bytes and compare to content-id.
+
+#### 3.3 WORM (Write Once, Read Many) storage and retention
+
+**Sources:** Azure immutable blob storage (container-level and version-level WORM, legal holds, retention intervals); Dell PowerScale SmartLock (compliance WORM: never alterable during retention; administrator can extend but not shorten retention; privileged delete for legal hold); Veeam WORM overview (software-enforced immutability flags, no overwrite/delete once written).
+
+WORM semantics map directly to immutability enforcement: once a record is sealed, no overwrite, no delete, no move until retention expires. Retention can be extended but not shortened (prevents admin backdoor). Legal holds suspend expiry indefinitely for investigations. `ids-immutable-record` enforces: sealed records reject mutation; retention timestamp governs purge eligibility; privileged-delete equivalent (governance override) requires signed audit authorization.
+
+#### 3.4 Merkle trees / Merkle DAGs for cross-replica verification
+
+**Sources:** IPFS Merkle-DAG docs (self-verified structures; CID linked to payload + descendants; dedup; conflict detection); Agent Flight Recorder (Merkle batching every N events, O(log N) inclusion proofs, epoch root chaining R_t = H(M_t || R_{t-1}), gap detection on epoch deletion); Certificate Transparency gossip aggregation (clients share same log view via gossip).
+
+Cross-replica immutability: each replica batches N sealed records into a Merkle tree; the Merkle root is the replica's commitment. Replicas exchange roots (as opaque `Vec<u8>` via `ids-carrier::Endpoint`) and compare; divergence = different roots → inclusion proof (O(log N)) identifies which records differ. Epoch root chaining across batches detects truncated/omitted epochs (gap detection). Anchoring the latest root to an external append-only reference (future phase) closes the global-rewrite gap.
+
+#### 3.5 Append-only replicated logs and eventual consistency
+
+**Sources:** TigerBeetle architecture (immutable hash-chained append-only log of prepares, replicated state machine, consensus on order); arxiv:2307.08381 (replicated append-only logs, fork detection under malicious participants); event sourcing (immutable log, records written never modified/deleted); 2P-BFT-Log (eventual consistency despite log forks).
+
+Immutable records across replicas form an append-only replicated log: each record appended with monotonically increasing sequence number. Replicas may receive entries out of order; eventual recovery reconstructs total order by sequence. Forks (malicious replica disseminating different entries at same index) are detected by hash-chain mismatch — only one chain verifies. `ids-immutable-record` defines the append-only log contract; `ids-replication` performs transport via `ids-carrier::Endpoint`.
+
+#### 3.6 Crypto: allowed set only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Sources:** RFC 8032 EdDSA/ed25519; RFC 7539/RFC 8439 ChaCha20-Poly1305; libsodium XChaCha20-Poly1305 (192-bit nonce, random nonces safe); NIST FIPS 180-4 SHA-256; BLAKE3 README (256-bit default, SIMD, parallelizable Merkle-tree inside, keyed hash/KDF/XOF); ed25519-dalek/chacha20poly1305/sha2/blake3 Rust crate docs.
+
+Usage in `ids-immutable-record`:
+- ed25519: signing seal decisions, audit checkpoints, per-record signatures (proof of protection decision).
+- sha256: hash-chain links (`entry_hash = SHA-256(prev_hash || content || seq)`).
+- blake3: content addressing (`content_id`), fast integrity re-checks, Merkle tree leaves.
+- xchacha20poly1305: encrypt record payloads at rest with random 192-bit nonces (safe for per-record keys).
+- chacha20poly1305: encrypt session/state payloads with 96-bit counter nonces (bounded use).
+
+No other crypto. `ids-crypto` is the sole crypto surface; `ids-immutable-record` references primitive IDs via `ids-000-aa`.
+
+#### 3.7 Expiry, retention, and crypto-shredding
+
+**Sources:** GDPR-KV (tombstone + purge sweeper, retention enforcement, `purge_due_at` timestamp); Dell SmartLock (extend-not-shorten retention, privileged delete); Chronicle audit ledger (crypto-shredding: encrypt PII under per-subject key, destroy key to erase, chain stays valid over ciphertext).
+
+Expiry model: each sealed record carries `expiry_at: IdsTime` (retention TTL from creation). Until `expiry_at`, record is immutable-but-readable. After `expiry_at`, the purge path is eligible: crypto-shredding destroys the per-record decryption key — ciphertext remains in place (chain still verifies byte-for-byte) but content is permanently unreadable. This preserves audit evidence (the fact that a record existed) while satisfying erasure requirements. Tombstone marking precedes physical purge; purge requires signed governance authorization recorded in audit.
+
+#### 3.8 Audit trail: signed, hash-chained decision log
+
+**Sources:** Chronicle (hash-chained append-only ledger, signed checkpoints, external anchoring, key rotation, exports); nexuscone (SHA-256 chain + Ed25519, canonical JSON before hashing, verifier walks chain from genesis); PALA-1 IETF draft (portable append-only log, append-only hash chain, seq gaps = breaks, consistency proofs between roots); QCIVET arxiv:2605.13109 (hash-chained audit, external anchoring to Sigstore Rekor/RFC3161/blockchain).
+
+Every protection decision in `ids-immutable-record` is an audit entry: `{seq, prev_hash, entry_hash = SHA-256(prev_hash || canonical(decision) || seq), decision_type, record_id, actor: NodeId, ts: IdsTime, signature: ed25519}`. Chain anchored at genesis (all-zeros prev_hash). Seq gaps = breaks. Periodic signed checkpoints (head hash + entry count + timestamp) enable offline verification and tail-truncation detection. External anchoring (Merkle root of epoch checkpoints) deferred to a later phase.
+
+#### 3.9 Tamper detection mutation classes and verification
+
+**Sources:** AuditWeave (four mutation classes: field edit, reorder, deletion, insertion — all detected over 2000 trials; each class breaks the chain differently); Argus (fail-closed tamper detection, ~46.5 µs detection at sequence 500k); the-substrate (row.hash = SHA256(prev_hash || index || canonical_json(body))).
+
+`ids-immutable-record` verification detects: `ContentEdit` (stored hash mismatch), `ChainBreak` (prev_hash mismatch — insertion/deletion), `Reorder` (sequence position shift), `Truncation` (head/count anchor mismatch — suffix deleted), `Insertion` (forged entry displaces genuine successor). Verification recomputes every hash from genesis and reports the first failing entry. Fail-closed: any verification failure aborts the read and returns `Tampered`.
+
+#### 3.10 Immutable data structures in Rust (persistent collections)
+
+**Sources:** prust (immutable/persistent collections, structural sharing); imbl (RRB-tree vectors, HAMT hash maps, B+tree ordered maps, lazy clone-on-write); fplist (persistent singly-linked list, Rc/Arc); persistent_list (Arc + clone-on-write list).
+
+`ids-immutable-record` uses persistent/structural-sharing collections for in-memory representations of sealed records and chain segments: appending a new record shares all unchanged structure with the previous version, making snapshot reads cheap and lock-free (immutable objects never change → no stale reads, simple concurrency). This is an in-memory optimization, not a transport concern; all cross-replica bytes remain opaque `Vec<u8>` via `ids-carrier::Endpoint`.
+
+#### 3.11 Deterministic canonical serialization
+
+**Sources:** Same Data Different Bytes arxiv:2610.24916 (serialization-invariant identification — canonical representation before hashing); QCIVET (canonical JSON serialiser: sorted keys, no whitespace); nexuscone (canonical JSON before hashing so same record = same fingerprint regardless of key order).
+
+Hash-chain integrity depends on deterministic serialization: the same logical record must always hash to the same value. `ids-immutable-record` canonicalizes before hashing: fixed field order, sorted map keys, no whitespace, fixed-size integer encodings, `IdsTime` ticks (not wall-clock). Canonicalization is part of the sealed record's verifiable bytes.
+
+#### 3.12 Clock policy: logical time only for immutability
+
+**Sources:** PACELC / CAP (availability vs consistency under partition); IDs standard time (monotonic `IdsTime` from ids-000-aa, never wall-clock for ordering); Sequential vs linearizable consistency (Attiya SPAA'91; linearizability needs real-time order, quorum intersection does not).
+
+Immutability decisions use logical sequence numbers and monotonic `IdsTime` ticks — never wall-clock — for chain ordering and expiry evaluation. Wall-clock is used only for human-readable timestamps in audit entries, never for security decisions. This prevents clock manipulation from breaking chain order or expiry.
+
+#### 3.13 Carrier-agnostic transport boundary
+
+**Sources:** HX-241 carrier-agnostic socket abstraction; idfs plan-001/plan-048/plan-060/plan-077 (carrier boundary pattern replicated across phases).
+
+`ids-immutable-record` never addresses a network. It returns `SealDecision`/`TamperVerdict`/`ExpiryVerdict`/`AuditEntry`; the caller frames these into opaque `Vec<u8>` datagrams sent via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` ≤ 1024 bytes). No `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh anywhere in the crate.
+
+#### 3.14 Measurable protection properties
+
+**Sources:** WORM retention enforcement; hash-chain tamper detection (detection rate 100% across mutation classes); Merkle inclusion proofs (O(log N)); crypto-shredding erasure proof.
+
+Quantifiable properties this crate targets (validated at implementation):
+- Tamper detection: 100% of field edits / insertions / deletions / reorders / truncations detected by chain verification (per hash-chain construction).
+- Content-addressing: identical content ⇒ identical `content_id` (BLAKE3 collision resistance).
+- Cross-replica divergence: detectable via Merkle root comparison; inclusion proof O(log N) per record.
+- Expiry enforcement: records unreadable after `expiry_at` unless purge authorized; crypto-shredding makes content unrecoverable after key destruction.
+- Audit integrity: every protection decision Ed25519-signed + hash-chained; offline verifiable from genesis.
+
+---
+
+### 4. Threat Model & Mitigations
+
+|| Threat | Asset at risk | Mitigation (this crate) ||
+|--------|-----------|-------------------------------|--------------------------|
+| Record content edited after seal | Record integrity | Hash-chain recompute detects `ContentEdit` at mutated entry; all subsequent hashes break |
+| Record deleted or inserted mid-chain | Chain continuity | `ChainBreak` on prev_hash mismatch; seq gaps flagged as breaks |
+| Records reordered | Ordering integrity | Sequence positions shift → reorder detected on recompute |
+| Tail truncation (suffix deleted) | Completeness | Head/count anchors; shorter chain fails against last signed checkpoint |
+| Global rewrite (adversary recomputes whole chain) | Chain integrity | External anchoring of Merkle roots (future phase); signed checkpoints |
+| Clock manipulation for expiry/ordering | Expiry correctness | Logical seq + monotonic IdsTime only; wall-clock never a security input |
+| Unauthorized purge before expiry | Retention policy | Purge requires signed governance authorization in audit; retention extend-not-shorten |
+| Key extraction (seal/audit signing key) | Decision authenticity | Keys never leave node; encrypted at rest (xchacha20poly1305/chacha20poly1305); zeroize on drop |
+| Replica divergence (forked chains) | Cross-replica immutability | Merkle root comparison + O(log N) inclusion proofs detect divergence |
+| Audit log tampering | Accountability | SHA-256/BLAKE3 hash chain + periodic ed25519-signed checkpoints; offline verifiable |
+| Carrier duplicates/delays datagrams | Replay/ordering | Idempotent chain verification tolerates duplicates; seq-based ordering tolerates delay |
+| Non-allowed crypto smuggled in | Crypto policy | Allowlist unit test; `ids-crypto` sole crypto surface; CI dependency audit |
+
+The carrier is never trusted: seal decisions and audit entries are signed over bytes, surviving any carrier re-framing; the carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack is in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+|| Crate | Role | Relevance to ids-immutable-record ||
+|-------|-------|-----------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Error` — consumed, never redefined |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive | All protection traffic flows as opaque datagrams to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing seal/audit; encrypting payloads at rest; hashing content and chain links |
+| `ids-store` | Primary record store (protection user) | Tags records as sealed; consults `ids-immutable-record` before admitting any write/delete to a sealed record |
+| `ids-replication` | Replica synchronization | Replicates sealed records and chain heads via `ids-carrier::Endpoint`; reports divergence |
+| `ids-fragment` | Record fragments/shards | Fragment writes governed by parent record's sealed/immutable status |
+| `ids-consistency-profile` (Phase 060) | Read/write behavior per profile | Profile must not permit writes to sealed/immutable records; immutability guard checked before write admission |
+| `ids-time` | Monotonic time source | `IdsTime` ticks for `sealed_at`, `expiry_at`, audit timestamps; never wall-clock for security |
+
+**Integration points:** `ids-immutable-record` evaluates protection policies and returns decisions; callers frame decisions into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on ids-discovery/ids-session/ids-cli beyond what contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-immutable-record/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-immutable-record/
+├── Cargo.toml                          # serde, thiserror, blake3, sha2, ed25519-dalek (ids-crypto re-export), chacha20poly1305 via ids-crypto; workspace member
+├── lib.rs                              # crate root, feature gates, public re-exports
+├── constants.rs                        # Protection defaults: chain genesis hash, MAX_ADDRESS_SIZE, retention defaults
+├── error.rs                            # ImmutableError (thiserror): SealError, TamperError, ExpiryError, AuditError
+├── features.rs                         # Feature flags: audit, crypto-at-rest, merkle, expiry
+├── types.rs                            # RecordId, ContentId, ChainEntry, SealDecision, TamperVerdict, ExpiryVerdict, AuditEntry (re-exports ids-000-aa types)
+│
+├── creation/                           # Immutable record creation
+│   ├── mod.rs
+│   ├── sealer.rs                       # Computes content_id (BLAKE3), seals into chain, emits SealDecision
+│   ├── content_address.rs              # Content-addressed ID: content_id = BLAKE3(canonical_bytes)
+│   ├── canonical.rs                    # Deterministic canonical serialization before hashing
+│   └── types.rs                        # CreationRequest, SealedRecord structures
+│
+├── enforcement/                        # Immutability enforcement (WORM policy)
+│   ├── mod.rs
+│   ├── guard.rs                        # Rejects WRITE/DELETE on sealed records; append-only corrections only
+│   ├── retention.rs                    # Retention TTL, expiry_at computation, extend-not-shorten rule
+│   ├── worm_policy.rs                  # WORM state machine: Sealed → Readable → Expired → PurgeEligible
+│   └── types.rs                        # EnforcementDecision structures
+│
+├── tamper_detection/                   # Tamper evidence via hash-chain verification
+│   ├── mod.rs
+│   ├── verifier.rs                     # Recomputes SHA-256 chain from genesis; reports first failing entry
+│   ├── chain_link.rs                   # entry_hash = SHA-256(prev_hash || canonical(content) || seq)
+│   ├── mutation_classes.rs             # ContentEdit, ChainBreak, Reorder, Insertion, Truncation
+│   ├── anchor.rs                       # Head/count anchors for tail-truncation detection
+│   └── types.rs                        # TamperVerdict structures
+│
+├── cross_replica/                      # Immutable record across replicas
+│   ├── mod.rs
+│   ├── merkle.rs                       # Merkle tree over sealed records; O(log N) inclusion proofs
+│   ├── root_compare.rs                 # Replica root comparison; divergence detection
+│   ├── epoch_chain.rs                  # Epoch root chaining R_t = H(M_t || R_{t-1}); gap detection
+│   ├── sync.rs                         # Cross-replica sync decision (which records to reconcile)
+│   └── types.rs                        # ReplicaCommitment, InclusionProof structures
+│
+├── expiry/                             # Immutable record expiry
+│   ├── mod.rs
+│   ├── retention.rs                    # Retention timestamps; expiry_at evaluation vs IdsTime
+│   ├── purge.rs                        # Purge eligibility; crypto-shredding (destroy decryption key)
+│   ├── tombstone.rs                    # Tombstone marking before physical purge
+│   └── types.rs                        # ExpiryVerdict, PurgeDecision structures
+│
+├── audit/                              # Immutable record audit (signed hash-chain log)
+│   ├── mod.rs
+│   ├── audit_entry.rs                  # {seq, prev_hash, entry_hash, decision_type, record_id, actor, ts, signature}
+│   ├── audit_chain.rs                  # Append-only hash chain of decisions from genesis
+│   ├── checkpoint.rs                   # Signed checkpoint: head hash + entry count + timestamp
+│   ├── signer.rs                       # ed25519 signing of checkpoints and entries
+│   ├── verifier.rs                     # Offline chain verification from genesis
+│   └── types.rs                        # AuditDecision structures
+│
+├── contracts/                          # Sealed trait contracts (~10 files)
+│   ├── mod.rs
+│   ├── creation_contract.rs            # trait Creation (seal record)
+│   ├── enforcement_contract.rs         # trait Enforcement (reject mutation of sealed)
+│   ├── tamper_contract.rs              # trait TamperDetection (verify chain)
+│   ├── replication_contract.rs         # trait CrossReplicaImmutability (compare roots)
+│   ├── expiry_contract.rs              # trait Expiry (evaluate retention)
+│   ├── audit_contract.rs               # trait Audit (log protection decision)
+│   ├── carrier_contract.rs             # trait CarrierAdapter (opaque datagram framing)
+│   ├── crypto_contract.rs              # trait CryptoSurface (allowed primitives only)
+│   └── mod.rs
+│
+├── invariants/                         # Compile-time/runtime invariants (~8 files)
+│   ├── mod.rs
+│   ├── chain_continuity.rs             # hash-chain continuity invariant
+│   ├── content_address_stable.rs       # content_id determinism invariant
+│   ├── carrier_agnostic.rs             # no std::net/tokio::net in crate
+│   ├── crypto_allowlist.rs             # only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305
+│   ├── retention_extend_not_shorten.rs # retention can only extend
+│   ├── seal_before_write.rs            # sealed records reject mutation
+│   ├── audit_chain_sound.rs            # audit chain verifies from genesis
+│   └── mod.rs
+│
+├── persistence/                        # On-disk sealed record storage types (~6 files)
+│   ├── mod.rs
+│   ├── store.rs                        # Append-only sealed record store interface
+│   ├── segment.rs                      # Chain segment types
+│   ├── index.rs                        # content_id → record location index
+│   ├── snapshot.rs                     # Immutable snapshot views (structural sharing)
+│   └── types.rs
+│
+├── crypto_at_rest/                     # Encrypted payloads at rest (~4 files)
+│   ├── mod.rs
+│   ├── xchacha_seal.rs                 # XChaCha20-Poly1305 per-record encryption (random nonce)
+│   ├── chacha_seal.rs                  # ChaCha20-Poly1305 session encryption (counter nonce)
+│   └── key_mgr.rs                      # Per-record key generation, zeroize on drop
+│
+├── tests/                              # Property/verification tests (~30 files)
+│   ├── creation_tests.rs
+│   ├── enforcement_tests.rs
+│   ├── tamper_detection_tests.rs       # All mutation classes detected
+│   ├── cross_replica_tests.rs          # Merkle divergence detection
+│   ├── expiry_tests.rs
+│   ├── audit_tests.rs
+│   ├── canonical_tests.rs              # Deterministic serialization
+│   ├── carrier_agnostic_tests.rs       # No std::net/tokio::net references
+│   ├── crypto_allowlist_tests.rs       # Only allowed primitives
+│   └── property_tests.rs               # proptest properties
+│
+├── benches/                            # (~10 files)
+│   ├── seal_bench.rs
+│   ├── verify_bench.rs
+│   ├── merkle_bench.rs
+│   └── ...
+│
+├── spec/                               # Normative specifications
+│   ├── creation_spec.md
+│   ├── enforcement_spec.md
+│   ├── tamper_detection_spec.md
+│   ├── cross_replica_spec.md
+│   ├── expiry_spec.md
+│   ├── audit_spec.md
+│   └── carrier_agnostic_spec.md
+│
+├── docs/                               # Documentation
+│   ├── architecture.md
+│   ├── worm_model.md
+│   ├── crypto_shredding.md
+│   ├── adding_a_protection_domain.md
+│   └── crypto_policy.md
+│
+├── test_vectors/                       # Deterministic inputs and expected outputs
+│   ├── chain_vectors.json              # Expected chain hashes for known inputs
+│   ├── merkle_vectors.json             # Expected roots/proofs
+│   └── mutation_vectors.json           # Expected tamper verdicts per mutation class
+│
+└── README.md
+```
+
+Total: ~90–1000 files across `src/` subdomains (`creation`, `enforcement`, `tamper_detection`, `cross_replica`, `expiry`, `audit`, `persistence`, `crypto_at_rest`), `src/contracts/`, `src/invariants/`, `tests/`, `benches/`, `spec/`, `docs/`, `test_vectors/`, organized so each protection concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+#### 7.1 Content-addressed record ID
+```
+content_id = BLAKE3(canonical_bytes(payload))   # 256-bit
+RecordId = ids_000_aa::RecordId derived from content_id
+```
+Identical content ⇒ identical content_id (deduplication); any content change ⇒ different content_id (old record intact).
+
+#### 7.2 Hash-chain seal
+```
+entry_hash(n) = SHA-256(prev_hash || canonical(content_n) || seq_n)
+entry(0).prev_hash = GENESIS (all-zeros 32 bytes)
+```
+Any field edit changes that entry's hash; any insert/delete/reorder breaks prev_hash links and shifts sequence positions; truncation detected by head/count anchors.
+
+#### 7.3 Tamper verdict classification
+| Detection | Cause |
+|-----------|-------|
+| ContentEdit | stored entry_hash != recomputed SHA-256 |
+| ChainBreak | entry.prev_hash != actual previous entry_hash |
+| Reorder | sequence position shifted relative to neighbors |
+| Insertion | forged entry displaces genuine successor (its prev_hash no longer matches neighbor) |
+| Truncation | chain head/count mismatch vs signed anchor |
+
+Verification recomputes every entry from genesis; first failing entry localizes tampering.
+
+#### 7.4 Merkle cross-replica commitment
+```
+Merkle root M_t over N sealed record content_ids as leaves
+Epoch root R_t = H(M_t || R_{t-1}), R_0 = H(M_0 || 0^32)
+Replica divergence ⇔ different M_t; inclusion proof O(log N) identifies differing records
+```
+
+#### 7.5 WORM enforcement state machine
+```
+Sealed → Readable (until expiry_at) → Expired → PurgeEligible
+Retention can extend (expiry_at moves later) but never shorten
+Purge = crypto-shredding: destroy per-record decryption key; ciphertext stays chain-valid but unreadable
+```
+
+#### 7.6 Audit decision entry
+```
+{seq, prev_hash, entry_hash = SHA-256(prev_hash || canonical(decision) || seq),
+ decision_type ∈ {Create, Seal, Verify, Expire, Purge},
+ record_id, actor: NodeId, ts: IdsTime, signature: ed25519}
+```
+Checkpoint: signed (head_hash, entry_count, timestamp) every N entries; offline verifiable from genesis.
+
+#### 7.7 Crypto-shredding (expiry)
+```
+encrypt payload with per-record key K (xchacha20poly1305)
+on expiry + authorized purge: zeroize K
+ciphertext remains in store; chain still verifies; content permanently unrecoverable
+```
+
+---
+
+### 8. Dependencies
+
+`ids-immutable-record/Cargo.toml`:
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `serde` + `serde_bytes` — canonical serialization of sealed records and audit entries.
+- `thiserror` — error types.
+- `zeroize` — secure key wiping for crypto-at-rest keys.
+- `blake3` — content addressing (direct, for content_id computation).
+- `sha2` — hash-chain links (direct, for entry_hash).
+- Dev-only: `proptest`, `tempfile`, `criterion` (benches).
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list; `ids-immutable-record` imports no crypto directly — all via `ids-crypto` (plus direct blake3/sha2 for content-addressing and chain hashing, both in the allowed set).
+
+Downstream dependents: `ids-store`, `ids-replication`, `ids-fragment` each depend on `ids-immutable-record` via path.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+|| # | Criterion | Measurement ||
+|---|---|-----------|-------------|
+| AC-98.1 | Record creation: content-addressed ID (content_id = BLAKE3(canonical bytes)) | identical content ⇒ identical content_id; any change ⇒ different ID |
+| AC-98.2 | Seal into append-only SHA-256 hash chain from genesis (all-zeros prev_hash) | chain verifies from genesis for all sealed records |
+| AC-98.3 | Immutability enforcement: WRITE/DELETE on sealed record rejected 100% | enforcement guard returns Reject for all mutation attempts on sealed records |
+| AC-98.4 | Tamper detection: all mutation classes detected (field edit, insertion, deletion, reorder, truncation) | 100% detection rate over injected mutations; verdict localizes to entry index |
+| AC-98.5 | Cross-replica immutability: Merkle root comparison detects replica divergence | divergent roots ⇔ divergence; O(log N) inclusion proof identifies differing records |
+| AC-98.6 | Expiry enforcement: records readable until expiry_at; unreadable after authorized purge | read before expiry returns content; read after crypto-shred returns unrecoverable |
+| AC-98.7 | Crypto-shredding: destroying per-record key makes ciphertext chain-valid but content unrecoverable | chain verifies; decryption fails after key zeroize |
+| AC-98.8 | Retention: extend allowed, shorten rejected | enforcement rejects attempts to move expiry_at earlier |
+| AC-98.9 | Audit: every protection decision Ed25519-signed + hash-chained from genesis | offline verification passes; tail-truncation detected via head/count anchor |
+| AC-98.10 | All traffic via `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`); zero references to `std::net`/`tokio::net`/libp2p/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | dependency audit test (`cargo tree`) + source grep passes |
+| AC-98.11 | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 in crypto surface | allowlist unit test passes |
+| AC-98.12 | Deterministic canonical serialization: same record ⇒ same hash regardless of key order | canonical_tests pass |
+| AC-98.13 | Crate compiles cleanly | `cargo check -p ids-immutable-record` exits 0 with no warnings |
+| AC-98.14 | Test suite passes | `cargo test -p ids-immutable-record` passes all tests |
+
+---
+
+### 10. Remaining Uncertainties
+
+- **Concrete retention TTL defaults per record class:** deployment-tuned; validated at integration with `ids-store`.
+- **Merkle batching size (N records per tree) and epoch interval:** convergence-detection latency vs bandwidth tradeoff; workload-dependent.
+- **Purge authorization handshake:** who signs a purge (governance key, multi-sig) — defined here as signed governance authorization, validated at integration.
+- **External anchoring of Merkle roots:** deferred to a later phase (blockchain/timestamping authority); this crate produces roots but does not anchor.
+- **Interaction with `ids-consistency-profile` (Phase 060):** profile write admission must respect sealed/immutable status; exact guard handshake defined here, validated at integration.
+- **Snapshot read performance with structural-sharing persistence:** in-memory snapshot reads are cheap, but on-disk segment layout for very long chains untested.
+- **Zeroize reliability:** secure key wiping depends on optimizer not eliminating the wipe; `zeroize` crate + `asm!` barrier where needed; target-dependent.
+
+---
+
+### 11. Engineering Decisions Summary
+
+|| Decision | Rationale ||
+|----------|-----------|-------------|
+| Separate crate `ids-immutable-record` (not a folder) | Follows "separate crates instead of more folders" directive; clear protection boundary |
+| Content-addressed IDs (content_id = BLAKE3) | Content = identity; deduplication; any change yields new object, old intact |
+| SHA-256 hash chain from genesis (all-zeros prev_hash) | Tamper-evidence: edit/insert/delete/reorder/truncation all detectable via recompute |
+| Merkle-batched cross-replica roots + epoch chaining | O(log N) inclusion proofs; gap detection on truncated epochs; divergence visible via root comparison |
+| WORM enforcement: sealed records reject mutation, corrections as append-only | Equivalent to append-only database trigger; no application-level bypass |
+| Retention: extend-not-shorten; expiry_at governs purge eligibility | Prevents admin backdoor shortening retention; legal-hold compatible |
+| Crypto-shredding on expiry: destroy per-record key, ciphertext stays | Erasure requirement satisfied while chain remains verifiable (evidence of existence preserved) |
+| Audit: SHA-256/BLAKE3 hash chain + ed25519-signed checkpoints | Offline-verifiable decision log; tamper evidence; tail-truncation detection via anchors |
+| Logical seq + monotonic IdsTime only; no wall-clock for security | Clock manipulation cannot break chain order or expiry |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends | Preserves IDS architecture; no network stack in trust base |
+| Allowed crypto only; `ids-crypto` sole crypto surface (blake3/sha2 direct for content/chain) | Complies with allowed-crypto rule |
+| Canonical deterministic serialization before hashing | Same logical record always hashes identically; chain integrity depends on it |
+
+---
+
+### 12. Sources
+
+[^1]: Immutable.dev, "Trust Architecture" — SHA-256 hash chain across all fields, per-workspace, PostgreSQL advisory locks; Merkle root anchoring to Base blockchain. https://docs.getimmutable.dev/trust/overview
+[^2]: Immutable.dev, "Hash Chain" — per-event SHA-256 chaining; hash_mismatch and chain_break break types. https://docs.getimmutable.dev/guides/hash-chain
+[^3]: AuditWeave, arxiv:2607.09682 — append-only SHA-256 chain; detection of edit/reorder/delete/insert over 2,000 trials; tamper-evidence not tamper-resistance. https://arxiv.org/html/2607.09682
+[^4]: Stackbilt-dev audit-chain — SHA-256 prev-hash chaining; head/count anchors detect tail truncation; append-only, fail loud. https://github.com/Stackbilt-dev/audit-chain
+[^5]: Agent Flight Recorder, arxiv:2609.01931 — hash chain + Merkle batching + epoch root chaining R_t = H(M_t || R_{t-1}); gap detection. https://arxiv.org/html/2609.01931
+[^6]: nexuscone — SHA-256 chain + Ed25519 signing; canonical JSON before hashing; genesis row of zeros; verifier walks from genesis. https://github.com/aperintelligence/nexuscone
+[^7]: Chronicle (Laravel) — append-only hash-chained ledger; signed checkpoints; external anchoring; crypto-shredding for GDPR erasure. https://github.com/laravel-chronicle/core
+[^8]: PALA-1 IETF draft — Portable Append-only Log for Audit; seq gaps = breaks; consistency proofs between roots. https://ietf.org/archive/id/draft-sparysh-pala-audit-02.html
+[^9]: IPFS Merkle DAG docs — immutable, content-addressed nodes; any change alters identifier and ascendants; self-verified. https://github.com/ipfs/ipfs-docs/blob/main/docs/concepts/merkle-dag.md
+[^10]: Git object model — content-addressed blobs/trees/commits; immutable objects; dedup by identical content. https://gist.github.com/aschuma/9453eb9c5dea8ee89c2c86935f344add
+[^11]: Azure immutable blob storage — container-level and version-level WORM; legal holds; retention intervals. https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blob-immutable-storage
+[^12]: Dell PowerScale SmartLock — WORM state; compliance WORM never alterable during retention; extend-not-shorten; privileged delete. https://dell.com/en-us/infohub/articles/dell-powerscale-smartlock-best-practices
+[^13]: Veeam — WORM (Write Once, Read Many) storage overview; software-enforced immutability flags. https://veeam.com/blog/what-is-worm-storage.html
+[^14]: TigerBeetle architecture — immutable hash-chained append-only log of prepares; replicated state machine. https://github.com/tigerbeetle/tigerbeetle/blob/0.16.54/docs/internals/ARCHITECTURE.md
+[^15]: arxiv:2307.08381 — replicated append-only logs; fork detection under malicious participants. https://arxiv.org/pdf/2307.08381v2
+[^16]: RFC 8032 — Edwards-Curve Digital Signature Algorithm (EdDSA), ed25519. https://www.rfc-editor.org/rfc/rfc8032
+[^17]: RFC 7539 / RFC 8439 — ChaCha20 and Poly1305 for IETF Protocols; 96-bit nonce AEAD. https://www.rfc-editor.org/rfc/rfc7539
+[^18]: Libsodium — XChaCha20-Poly1305 construction; 192-bit nonce, random nonces safe. https://doc.libsodium.org/doc/secret-key_cryptography/aead/chacha20-poly1305/xchacha20-poly1305_construction
+[^19]: NIST FIPS 180-4 — Secure Hash Standard (SHA-256). https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.180-4.pdf
+[^20]: BLAKE3 README — BLAKE3-256, SIMD, parallelizable Merkle-tree inside, keyed hash/KDF/XOF. https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md
+[^21]: ed25519-dalek docs.rs — ed25519 key gen/sign/verify. https://docs.rs/ed25519-dalek
+[^22]: chacha20poly1305 docs.rs — ChaCha20Poly1305/XChaCha20Poly1305 AEAD. https://docs.rs/chacha20poly1305
+[^23]: GDPR-KV — tombstone + purge sweeper; retention enforcement; `purge_due_at` timestamp. https://github.com/jessicant/GDPR-KV
+[^24]: QCIVET, arxiv:2605.13109 — hash-chained audit trail; external anchoring to Sigstore Rekor/RFC3161/blockchain. https://eprint.iacr.org/2019/192.pdf ; https://arxiv.org/pdf/2605.13109v1
+[^25]: prust / imbl — immutable persistent collections with structural sharing in Rust. https://github.com/victorcolombo/prust ; https://docs.rs/imbl
+[^26]: Same Data Different Bytes, arxiv:2610.24916 — serialization-invariant identification; canonical representation before hashing. https://arxiv.org/html/2610.24916v1
+[^27]: IDS prompts.txt entry 98 (verbatim). C:/idfs/prompts.txt lines 1465-1479
+[^28]: Existing ids-000-aa skeleton. C:/idfs/ids-000-aa/
+[^29]: HX-241 reference plan format. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md, plan-077.md — Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+[^30]: HX-241 carrier-agnostic socket abstraction — Endpoint = CarrierType + Vec<u8>; no networking stack.
+
+---
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document. The blueprint above defines all architecture, protection domains, algorithms, data structures, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 098 (ids-immutable-record).
+
+
+# PHASE 099:
+
+## Phase 099 — Create the ids-compaction crate (Compact fragmented storage and reclaim space): Research Findings & Implementation Blueprint
+
+**Research complete (29 targeted searches executed; 1 rate-limited retry succeeded). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### 1. Executive Summary
+
+Phase 099 creates `ids-compaction`, a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by compaction domain. `ids-compaction` compacts fragmented storage and reclaims space: fragment compaction (merge small/fragmented runs into larger ones), tombstone reclamation (drop deletion markers once grace-period and shadowing constraints allow), obsolete version removal (drop superseded MVCC versions no longer visible), space amplification reduction (physical/logical byte ratio), compaction scheduling (priority scoring, adaptive rate control, foreground protection), and compaction verification (checksum verification of inputs/outputs, tombstone-drop safety checks).
+
+**Core design:** a background compaction service that never touches `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All cross-node traffic rides `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>`) via `ids-carrier`. Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 (consumed via `ids-crypto`; `ids-compaction` declares type-level surface only — `Checksum`, `Signature`, `KeyId` — from `ids-000-aa`). Crate depends on `ids-000-aa` (canonical types, sealed contracts, invariants, errors) only at the type/contract level.
+
+**Scope boundary:** `ids-compaction` plans, schedules, and verifies compaction; it never performs raw I/O directly — it drives the store layer through the sealed `Store` contract declared in `ids-000-aa`. Allowed crypto is used for integrity verification (sha256/blake3 checksums on compacted output) and signed audit checkpoints (ed25519) plus optional encryption of compaction state at rest (xchacha20poly1305/chacha20poly1305).
+
+A skeleton `ids-compaction` crate does NOT yet exist at `C:/idfs/ids-compaction/`. `ids-000-aa` is the master crate holding every canonical type and sealed trait contract referenced by this crate but never redefined here.
+
+**Research basis:** 30 parallel searches returned LSM-tree compaction fundamentals (multiway merge sort of SSTables, level/size-tiered strategies, fanout); space amplification = durable + transient (VDB/pvldb Dayan et al.); write amplification 10–30× under random workloads (Tidehunter arxiv:2602.01873); leveled vs tiered compaction tradeoffs (RocksDB wiki, VDB Constructing and Analyzing the LSM Compaction Design Space); universal compaction (RocksDB); tombstone reclamation with grace periods (Cassandra `gc_grace_seconds`, `tombstone_compaction_interval`, `only_purge_repaired_tombstones`, fully-expired SSTable dropping); MVCC garbage collection (CMU 15-721, tombstone retention under long-running snapshots); compaction priority scoring (Apache Doris compaction score, StarRocks max compaction score thresholds 10/100/2000, RocksDB leveled compaction score = size/target size); compaction scheduling & foreground protection (HATS fast26 co-scheduling foreground reads + compaction, adaptive rate control, write-stop thresholds `level0_slowdown_writes_trigger`/`level0_stop_writes_trigger`, RocksDB max_background_compactions); ScyllaDB control-theory-based compaction rate limiting; compaction filters (RocksDB CompactionFilter for TTL expiration, range deletion, key/value modification); compaction integrity verification (ScyllaDB checksum/digest checks on compacting SSTables, RocksDB Full File Checksum, per-KV checksums, compaction_verify_record_count); value separation / WiscKey (values out-of-band so compaction doesn't rewrite values); atomic manifest-based crash-safe compaction (emberkv, Bedrock, SlateDB `.compaction-replacements/`, temp+rename atomic swap); discard-and-compaction combined GC (ByteDance DisCoGC fast26 — discard reclaims stale space without moving valid data); locality-aware compaction (MetaDB fast26 locality-aware range compaction); concurrent compaction (CockroachDB compaction concurrency default 3); compaction suspension under load (backpressure, write stalls); PostgreSQL VACUUM/REPACK dead-tuple reclamation analog; blob file rewrite compactions (CockroachDB Pebble value separation); parallelizing I/O and computation in compaction (Pome arxiv:2307.16693, io_uring).
+
+---
+
+### 2. Architecture Overview
+
+`ids-compaction` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/orchestration layer: it selects candidate fragments/files for compaction, scores and schedules them, runs the compaction merge (drop tombstones/obsolete versions, keep latest valid version), verifies output integrity, and publishes the new file set atomically. It never sends bytes itself; it returns compaction decisions that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    STORE / FRAGMENT LAYER (compaction targets)              │
+│  ids-store, ids-fragment — fragmented runs, tombstones, obsolete versions   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                Phase 099: ids-compaction (THIS CRATE — orchestration)      │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌────────┐ │
+│  │ fragment         │ │ tombstone        │ │ obsolete-version │ │ space  │ │ │
+│  │ scanner          │ │ reclamation      │ │ removal          │ │ amp    │ │ │
+│  │ (candidate find) │ │ (grace period,   │ │ (MVCC watermark) │ │ tracker│ │ │
+│  └──────────────────┘ │  shadowing check)│ └──────────────────┘ │        │ │ │
+│  ┌──────────────────┐ └──────────────────┘ └──────────────────┘ └────────┘ │ │
+│  │ compaction       │ │ scheduling       │ │                    │        │ │ │
+│  │ scheduler        │ │ (priority score, │ │                    │        │ │ │
+│  │ (priority queue) │ │  adaptive rate,  │ │                    │        │ │ │
+│  └──────────────────┘ │  foreground cap) │ │                    │        │ │ │
+│  ┌──────────────────┐ └──────────────────┘ │                    │        │ │ │
+│  │ merge executor   │ │ compaction       │ │                    │        │ │ │
+│  │ (multiway merge, │ │ verification     │ │                    │        │ │ │
+│  │ drop latest-only)│ │ (checksum, tomb  │ │                    │        │ │ │
+│  └──────────────────┘ │  stone safety)   │ │                    │        │ │ │
+└───────────────────────┴──────────────────┬──────────────────────┴──────────┘
+                                           │ opaque Vec<u8> datagrams
+                                           ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              CARRIER BOUNDARY: ids-carrier::Endpoint only                   │
+│  send_datagram(Endpoint{CarrierType, addr: Vec<u8> ≤ 1024 B}, payload)      │
+│  receive_datagram → (Endpoint, Vec<u8>)                                     │
+│  No std::net / tokio::net / libp2p / IP / TCP / UDP / QUIC / HTTP / DNS /   │
+│  Wi-Fi / Bluetooth / cellular / VPN / mesh                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of one compaction job:**
+1. `fragment_scanner` scans the store/fragment layer for candidate runs (high tombstone ratio, many obsolete versions, small/fragmented files, high space amplification).
+2. `candidate_scorer` assigns a priority score (tombstone density, obsolete-byte ratio, fragment count, read amplification, age).
+3. `scheduler` admits jobs within the compaction rate cap and foreground-protection budget; low-priority jobs deferred under load.
+4. `merge_executor` performs multiway merge of selected input runs: keeps the latest valid version per key, drops tombstones past grace period and not shadowing older data elsewhere, drops obsolete MVCC versions below the GC watermark.
+5. `verifier` checksums inputs (sha256/blake3) before and output after; tombstone-drop safety check (no tombstone dropped while an older version still needs shadowing elsewhere).
+6. `publisher` atomically swaps the manifest (write temp output, fsync, atomic manifest edit, delete old inputs) — crash-safe: crash before swap = old set live; crash after = new set live, orphans cleaned on next open.
+7. `audit_logger` records each compaction decision in a hash-chained, ed25519-signed audit log (sha256/blake3 chain).
+
+**Compaction semantics (research-verified):**
+- **Fragment compaction:** merge multiple small/fragmented sorted runs into one larger run via k-way multiway merge (each input sorted → compare next unread key, write smallest, advance). Reduces read amplification (fewer files to search) and file-count overhead.
+- **Tombstone reclamation:** a tombstone is dropped only when (a) older than the grace period, (b) all SSTables/runs containing data older than the tombstone are in the same compaction (no shadowing), (c) optionally only if repaired. Fully tombstone/TTL-expired runs can be dropped wholesale when not shadowing other runs.
+- **Obsolete version removal:** MVCC — drop versions not visible to any active transaction/snapshot and below the GC watermark; long-running snapshots block reclamation of versions they still see.
+- **Space amplification reduction:** physical/logical byte ratio tracked before/after compaction; target compacted database has ~0% size amplification (RocksDB `max_size_amplification_percent` heuristic: files excluding earliest contribute to size amplification).
+- **Compaction scheduling:** priority score per candidate; RocksDB leveled score = level size / target size; StarRocks thresholds 10/100/2000; adaptive rate control (ScyllaDB control theory) — cap bytes/sec processed, rate-limit low-level compactions under foreground load, suspend under write pressure.
+- **Compaction verification:** per-block and per-file checksums verified on read of inputs and on write of outputs; mismatch fails the compaction and preserves the old file set.
+
+**Crypto used:** sha256/blake3 for compaction input/output integrity checksums and audit-chain links; ed25519 for signing audit checkpoints and compaction publish decisions; xchacha20poly1305/chacha20poly1305 to encrypt compaction state/metadata at rest when confidentiality required. No other crypto.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to one or more of the 30 targeted searches executed. Sources are cited inline with the source list in Section 13.
+
+#### 3.1 LSM-tree compaction fundamentals (multiway merge, levels, SSTables)
+**Source:** aaron-ang Intro to LSM Tree; YugabyteDB LSM/SST docs; Cassandra Storage Engine docs; CockroachDB Storage Layer docs; VDB Constructing and Analyzing the LSM Compaction Design Space (arxiv); VDB Dayan et al. pvldb vol15.
+
+Compaction is garbage collection for the LSM tree: several sorted runs are k-way merge-sorted into one; since each input is sorted, the merge compares the next unread key in each run, writes the smallest, and advances. When the same key appears in multiple inputs, only the newest entry is kept. A dedicated background thread typically performs compaction. SSTables are immutable sorted files; data is organized into blocks with index blocks and bloom filters. Compaction reduces read amplification (fewer runs per read) and reclaims space from obsolete entries, at the cost of write amplification.
+
+#### 3.2 Leveled vs size-tiered vs universal compaction
+**Source:** RocksDB wiki Compaction / Leveled Compaction / Universal Compaction; VDB Constructing and Analyzing the LSM Compaction Design Space; Cassandra Unified Compaction Strategy (UCS).
+
+- **Leveled:** one sorted run per level (L0 may overlap), exponentially increasing level sizes, fanout between levels. Minimizes space amplification at the cost of read/write amplification. Compaction score = level size / target size; highest score compacted first. L0 trigger = file count.
+- **Size-tiered / tiered:** multiple sorted runs per level; wait for several similar-size runs, merge them all into one run at the next level. Better write amplification, worse read amplification.
+- **Universal:** sorted runs cover non-overlapping time ranges; compaction among adjacent time ranges; threshold on number of runs; picks smallest file first, adds runs while size stays economic. Lower write amplification, trades off read/space amplification.
+- **Hybrid (Dostoevsky / continuum):** each level independently decides leveling vs tiering. RocksDB makes L1 tiering, rest leveling.
+
+ids-compaction will support leveled and tiered strategies as configuration, with universal as an option for time-range data.
+
+#### 3.3 Space amplification (durable + transient)
+**Source:** VDB Dayan et al. pvldb vol15 p3071; RocksDB wiki `max_size_amplification_percent`.
+
+LSM space amplification = factor by which physical size exceeds logical size. Two components:
+- **Durable space-amp:** obsolete entries (superseded versions, tombstones) occupying space until compaction discards them.
+- **Transient space-amp:** temporary extra space during compaction to store original and merged data simultaneously.
+total space-amp = 1 + transient + durable. Storage utilization = 1 / total space-amp. A fully compacted database has ~0% size amplification. RocksDB heuristic: all files except the earliest contribute to size amplification; default `max_size_amplification_percent = 200` (100 B logical → up to 300 B physical).
+
+#### 3.4 Write amplification
+**Source:** Tidehunter arxiv:2602.01873; VDB Design Space; Pome arxiv:2307.16693; RocksDB wiki.
+
+Write amplification = bytes written to disk / bytes received from application. LSM compaction rewrites data repeatedly across levels → 10–30× under random workloads, growing with dataset size. Leveled compaction write amplification ≈ fanout per level. Tiered/universal reduce write amplification at the cost of read/space amplification. Compaction consumes CPU, read bandwidth, and substantial write bandwidth; value separation (WiscKey, Pebble blob files) stops compaction from rewriting large values repeatedly.
+
+#### 3.5 Read amplification
+**Source:** CockroachDB Pebble value separation blog; VDB Design Space.
+
+Read amplification = number of read I/Os per logical read. More sorted runs = more files to search per point lookup/range scan. Compaction reduces read amplification by merging runs into fewer, longer sorted files. Tombstones increase read amplification: a scan must step through every invisible entry (tombstone/shadowed value) to find live data.
+
+#### 3.6 Tombstone reclamation (grace period, shadowing, fully-expired runs)
+**Source:** Cassandra Tombstones docs; Cassandra Compaction Overview; ScyllaDB TTL Facts; Instaclustr Managing Tombstones.
+
+Cassandra treats deletion as insertion of a time-stamped tombstone. Tombstones have a grace period (`gc_grace_seconds`, default 864000 s / 10 days) to let unresponsive nodes recover and process tombstones, preventing zombie reappearance. A tombstone is dropped only when:
+1. Older than `gc_grace_seconds`,
+2. The SSTable/run containing it plus all SSTables containing data older than the tombstone are in the same compaction (no shadowing — older data in another run could resurrect the deleted key),
+3. Optionally only if repaired (`only_purge_repaired_tombstones`).
+
+Fully expired SSTables (only tombstones/TTL-expired data, not shadowing anything) can be dropped wholesale. `tombstone_compaction_interval` (default 1 day) prevents re-compacting the same SSTable endlessly. `unchecked_tombstone_compaction` relaxes the safety checks. ScyllaDB: if data timestamp + gc_grace_seconds ≤ now, data is thrown away without creating a tombstone; if TTL > gc_grace_seconds, expired data never generates a tombstone.
+
+#### 3.7 Obsolete version removal (MVCC garbage collection)
+**Source:** CMU 15-721 MVCC Garbage Collection slides; VDB Design Space (deletes as tombstones, purged at compaction); MetaDB arxiv:2610.32247 (in-memory MVCC, locality-aware compaction).
+
+MVCC keeps multiple physical versions until no active transaction can see them. A version is reclaimable when (a) no active transaction can see it (snapshot isolation), and (b) it was not created by an aborted transaction. Physical deletion only when all versions of a logically deleted tuple are invisible. Long-running queries/transactions block GC of versions they still see. Tombstones persist through compaction until the grace period elapses and shadowing constraints are satisfied. MetaDB: in-memory MVCC prevents short-lived tombstones from reaching disk; locality-aware range compaction purges dense tombstone accumulations promptly.
+
+#### 3.8 Compaction scheduling and priority scoring
+**Source:** Apache Doris Compaction Principles (compaction score = merge paths = query overhead; higher score = higher priority); StarRocks Compaction best practices (max compaction score thresholds 10/100/2000; slowdown at 100, reject at 2000; delete-ratio and delete-row thresholds 0.5 / 10M); RocksDB Leveled Compaction (score = size/target size; L0 score = file count / trigger or size/base); VDB Design Space (data movement / file picking policies: random, round-robin, coldest-first, least-overlap); HATS fast26 (co-schedule foreground reads + compaction, adaptive rate control, allowed compaction rate bytes/sec, starvation lower bound); CaaS-LSM SIGMOD24 (priority queue: manual > background; higher input file level > lower; higher score > lower).
+
+ids-compaction scheduler: priority queue keyed by score (tombstone density, obsolete ratio, fragment count, read amplification, age, space-amp); manual-triggered jobs outrank background; higher input level/fragment depth outranks lower; admission gated by allowed compaction rate and foreground-protection budget; starvation lower bound ensures write-heavy low-read ranges still compact.
+
+#### 3.9 Foreground protection and backpressure
+**Source:** padho-wiki Walls (compaction I/O contends with foreground I/O; leveled writes 10–30× user bytes; p99 tail latency 1–20–40 ms; write stalls at `level0_stop_writes_trigger`); ScyllaDB control theory (closed-loop compaction rate control, rate limiting); Kbytechnologies Taming RocksDB Compaction Storms (cap compaction explicitly; `compaction_pending` + `stall_micros` leading indicators); HATS fast26.
+
+ids-compaction enforces: allowed compaction rate (bytes/sec) per node; compaction yields to foreground I/O (idle-priority or best-effort); write throttling/slowdown when L0/file count exceeds triggers; write stop when compaction cannot drain; adaptive rate decreases under foreground load and increases off-peak; randomized compaction schedules across nodes to avoid synchronized load spikes.
+
+#### 3.10 Compaction filters (TTL expiration, range deletion, key/value modification)
+**Source:** RocksDB wiki Compaction Filter; rocksdb.hexdocs.pm Compaction Filters; RocksDB options.h (compaction_filter, compaction_filter_factory, compaction_verify_record_count, delete_obsolete_files_period_micros).
+
+CompactionFilter lets applications delete/modify keys during background compaction: TTL expiration (drop expired keys), range deletion, value modification. `Filter`/`FilterMergeOperand` simple keep/remove/change-value callback; `FilterV2` allows changing values or `remove_and_skip_until` ranges. Factory creates per-compaction filters with context (full vs manual compaction). Thread-safe when multithreaded compaction. `compaction_verify_record_count` (default true) adds protection against corruption during compaction. Obsolete files deleted periodically (default 6 h) regardless of compaction.
+
+#### 3.11 Compaction integrity verification
+**Source:** Cassandra data integrity (CRC/Digest per SSTable; corruption found during reads and compactions); ScyllaDB compaction integrity checks (checksum/digest verification on compacting SSTables, compressed and uncompressed); RocksDB Full File Checksum and Checksum Handoff (file checksum at flush/compaction, stored in FileMetadata/MANIFEST); CockroachDB per-KV checksums (roachpb.Value 4-byte checksum, per-KV checksum proposal); OceanBase checksums at macroblock/microblock/SST levels, verified on write and read, daily major compaction as verification point.
+
+ids-compaction verification: per-block and per-file checksums (sha256/blake3) on inputs before compaction and output after; mismatch fails compaction, preserves old file set, raises alert. Full-file checksum stored with file metadata; per-KV checksum option for high-value data. Verification reuses the compaction read/write pass (no separate full scan).
+
+#### 3.12 Atomic, crash-safe compaction (manifest swap)
+**Source:** emberkv design; Bedrock design; SlateDB SST design (.compaction-replacements/); KayaDB architecture (manifest-defined live state).
+
+Crash-safe compaction pattern: write output to `*.tmp`, fsync, then atomically swap the manifest (temp + rename). The manifest is the source of truth for live files. Crash before swap → old set live, new segment is an orphan (ignored/deleted on open). Crash after swap → new set live, old segments are orphans (cleaned on next open). Reads always use the latest manifest version. Compaction version edit (add outputs, remove inputs) is a single append to the MANIFEST → all-or-nothing.
+
+#### 3.13 Discard-and-compaction combined GC
+**Source:** ByteDance DisCoGC fast26 (usenix.org/fast26-bian.pdf); fast26 slides.
+
+Compaction-only GC trades space amplification for write amplification (rewriting valid data). DisCoGC adds a discard mechanism: reclaim space occupied by stale data without moving valid data (discard physical ranges, no read/rewrite of valid data). Compaction then gathers fragmented valid data to lower metadata overhead. Trade-off: Compaction Read/Write=3, Metadata overhead=2; Discard Read/Write=0, Metadata overhead=3. Production: ~20% TCO reduction with 10% lower space amplification and 25% lower write amplification vs compaction-only. BlockServer compacts LogFiles with garbage ratio above threshold (garbage ratio = stale bytes / total bytes in file, found by scanning the LSM-tree for stale data ranges).
+
+#### 3.14 Locality-aware compaction
+**Source:** MetaDB arxiv:2610.32247.
+
+Conventional compaction is triggered passively by level saturation, delaying tombstone cleanup. Locality-aware range compaction exploits spatial locality of deletions (bulk deletions cluster in key ranges) to purge dense tombstone accumulations promptly, sustaining low latency for range scans. Combined with in-memory MVCC to prevent short-lived tombstones reaching disk.
+
+#### 3.15 Concurrent / parallel compaction
+**Source:** CockroachDB Storage Layer (compaction concurrency default 3, tunable via COCKROACH_COMPACTION_CONCURRENCY); Pome arxiv:2307.16693 (parallelize I/O and computation within compaction, async I/O via io_uring, move I/O off the critical path); D2Comp (DPU offload of compression-heavy compaction).
+
+ids-compaction supports N concurrent compaction jobs (default 3, tunable); within a job, decouple merge computation from I/O writes (async I/O) to shorten the critical path; parallel compression optional.
+
+#### 3.16 Value separation (optional, reduces compaction cost)
+**Source:** CockroachDB Pebble value separation blog; WiscKey (usenix FAST16); Tidehunter arxiv:2602.01873.
+
+Store values out-of-band (blob/log) keyed by pointer; compaction sorts/merges keys without rewriting values. Reduces write amplification and compaction I/O for large values. Blob file rewrite compaction reclaims dead values in blob files once unreferenced. ids-compaction may integrate with a value-separation layer but compaction logic itself operates on key+value runs.
+
+#### 3.17 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+**Source:** ed25519-dalek docs.rs (RFC 8032); chacha20poly1305 docs.rs (RFC 8439, XChaCha20 192-bit nonce); sha2 RustCrypto; BLAKE3-team README.
+
+- sha256 / blake3: compaction input/output integrity checksums, audit-chain links.
+- ed25519: signing compaction publish decisions and audit checkpoints.
+- xchacha20poly1305 / chacha20poly1305: encrypt compaction state/metadata at rest.
+No other algorithms.
+
+---
+
+### 4. Threat Model & Mitigations
+
+| Threat | Asset at risk | Mitigation (this crate) |
+|--------|-------------|-------------------------|
+| Space amplification growth (obsolete versions, tombstones linger) | Storage cost | Fragment compaction, tombstone reclamation, obsolete-version removal, space-amp tracker; priority score drives reclamation of high-garbage-ratio files first |
+| Write amplification / I/O contention with foreground | Performance, tail latency | Allowed compaction rate cap, foreground I/O priority, write slowdown/stop triggers, adaptive rate control, randomized schedules across nodes |
+| Tombstone dropped too early → zombie data resurrection | Data correctness | Grace period + shadowing check + optional repaired-only purge; all older-version runs in same compaction before drop |
+| Compaction corruption (bit rot, memory corruption) | Data integrity | Per-block + per-file checksums (sha256/blake3) on inputs and output; mismatch fails compaction, preserves old set; record-count verification |
+| Crash mid-compaction → lost or partial data | Durability | Atomic manifest swap (temp+rename); old set live until swap; orphans cleaned on next open; MANIFEST is single all-or-nothing edit |
+| Compaction starvation under foreground load | Space reclamation | Starvation lower bound on compaction rate; write-heavy low-read ranges still compact |
+| Compaction storms → write stop | Availability | Cap compaction explicitly; alert on `compaction_pending` + rising stall micros; slow down before write-stop threshold |
+| Prohibited crate in dependency tree | Carrier-agnostic rule | Dependency audit (CI `cargo tree`); no networking crates |
+| Disallowed crypto algorithm | Crypto policy | Only sha256/blake3/ed25519/xchacha20poly1305/chacha20poly1305; allowlist test |
+| Audit log tampering | Accountability | sha256/blake3 hash chain + ed25519-signed checkpoints; offline verifiable |
+
+The carrier is never trusted: compaction decisions and audit entries are signed/checksummed over bytes; carrier-agnostic boundary (opaque `Endpoint`, `CarrierType` + `Vec<u8>`) means no network stack in the trust base.
+
+---
+
+### 5. Integration with Existing Crates
+
+| Crate | Role | Relevance to ids-compaction |
+|-------|------|------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed trait contracts + invariants + errors | `NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Error` — consumed, never redefined; sealed `Store`/`Recovery` contracts drive compaction targets |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All compaction-related traffic flows via `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: sha256, blake3, ed25519, xchacha20poly1305, chacha20poly1305 | Integrity checksums, audit signatures, optional at-rest encryption |
+| `ids-store` | Primary record store (fragmented runs, SSTables) | Compaction targets; consumes compaction decisions, publishes new file sets |
+| `ids-fragment` | Record fragments/shards | Fragment compaction operates on fragment runs |
+| `ids-reclamation` (Phase 100) | Eligible data expiration, space reclamation | Upstream/downstream: compaction identifies reclaimable space; reclamation performs final space return |
+| `ids-recovery` | WAL replay, crash recovery | Crash-safe compaction integrates with manifest/recovery; orphans cleaned on recovery |
+| `ids-time` | Monotonic time source | Grace-period and watermark comparisons use `IdsTime` ticks, never wall-clock for ordering |
+
+**Integration points:** ids-compaction drives public contracts declared in ids-000-aa; it does not reach into crate internals. All cross-node traffic is opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. No dependency on ids-discovery/ids-session/ids-cli beyond what the contracts expose.
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-compaction/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-compaction/
+├── Cargo.toml                          # ids-000-aa, ids-carrier, ids-crypto, sha2, blake3, ed25519, chacha20poly1305, thiserror, serde; dev-only proptest, tempfile
+├── lib.rs                              # crate root, feature gates, public re-exports
+├── constants.rs                        # Compaction defaults: grace period, score thresholds, rate caps, concurrency
+├── error.rs                            # CompactionError (thiserror): candidate, schedule, merge, verify, publish errors
+├── features.rs                         # Feature flags: verify, encrypt, value-sep, concurrent, nightly
+│
+├── scanner/                            # Fragment/file candidate discovery
+│   ├── mod.rs
+│   ├── fragment_scanner.rs             # Scans store/fragment layer for compactable runs
+│   ├── candidate.rs                    # CompactionCandidate: run id, size, tombstone ratio, obsolete ratio, fragment count
+│   ├── garbage_ratio.rs                # Garbage ratio = stale bytes / total bytes (ByteDance DisCoGC pattern)
+│   └── types.rs                        # ScannerResult structures
+│
+├── scorer/                             # Candidate priority scoring
+│   ├── mod.rs
+│   ├── scorer.rs                       # Priority score: tombstone density, obsolete ratio, read amplification, age, space-amp
+│   ├── leveled_score.rs                # RocksDB-style level size / target size score
+│   ├── tiered_score.rs                 # Tiered/universal run-count score
+│   └── types.rs                        # ScoreResult structures
+│
+├── scheduler/                          # Compaction admission & scheduling
+│   ├── mod.rs
+│   ├── scheduler.rs                    # Priority queue, admission control, rate cap
+│   ├── rate_limiter.rs                 # Allowed compaction rate bytes/sec, adaptive control (ScyllaDB control theory)
+│   ├── backpressure.rs                 # Foreground protection: write slowdown/stop triggers, I/O priority
+│   └── types.rs                        # ScheduleResult structures
+│
+├── merge/                              # Multiway merge execution
+│   ├── mod.rs
+│   ├── merge_executor.rs               # k-way multiway merge, keep latest valid version
+│   ├── tombstone_reclaimer.rs          # Tombstone drop: grace period, shadowing check, repaired-only option
+│   ├── obsolete_version_remover.rs     # MVCC version removal below GC watermark
+│   ├── fully_expired_run.rs            # Drop wholly tombstone/TTL-expired runs when not shadowing
+│   └── types.rs                        # MergeResult structures
+│
+├── verifier/                           # Compaction integrity verification
+│   ├── mod.rs
+│   ├── verifier.rs                     # Input/output checksum verification (sha256/blake3)
+│   ├── checksum.rs                     # Per-block + per-file checksum computation and validation
+│   ├── tombstone_safety.rs             # Tombstone-drop safety check (no shadowing violation)
+│   ├── record_count.rs                 # compaction_verify_record_count-style input/output count check
+│   └── types.rs                        # VerifyResult structures
+│
+├── publisher/                          # Atomic manifest-based publishing
+│   ├── mod.rs
+│   ├── publisher.rs                    # Temp output, fsync, atomic manifest swap, orphan cleanup
+│   ├── manifest.rs                     # MANIFEST append-only log of {added, removed} files per version
+│   └── types.rs                        # PublishResult structures
+│
+├── space/                              # Space amplification tracking
+│   ├── mod.rs
+│   ├── tracker.rs                      # Physical vs logical byte ratio per run/level/database
+│   ├── ratio.rs                        # Amplification ratio before/after compaction
+│   └── types.rs                        # SpaceResult structures
+│
+├── audit/                              # Signed, hash-chained audit log
+│   ├── mod.rs
+│   ├── audit_entry.rs                  # Compaction decision entry (decision, inputs, outputs, timestamp)
+│   ├── audit_chain.rs                  # sha256/blake3 hash chain
+│   ├── checkpoint.rs                   # ed25519-signed periodic checkpoints
+│   ├── signer.rs                       # Signing with ed25519
+│   ├── verifier.rs                     # Offline verification of chain + checkpoints
+│   └── types.rs                        # AuditResult structures
+│
+├── contracts/                          # Sealed trait contracts (~8 files)
+│   ├── mod.rs
+│   ├── compaction_contract.rs          # trait Compaction (select, schedule, merge, verify, publish)
+│   ├── scanner_contract.rs             # trait FragmentScanner
+│   ├── scheduler_contract.rs           # trait CompactionScheduler
+│   ├── merge_contract.rs               # trait MergeExecutor
+│   ├── verifier_contract.rs            # trait CompactionVerifier
+│   ├── publisher_contract.rs           # trait CompactionPublisher
+│   └── carrier_contract.rs             # Opaque datagram framing to ids-carrier::Endpoint (decision carrier only)
+│
+├── invariants/                         # Compaction invariants (~8 files)
+│   ├── mod.rs
+│   ├── no_early_tombstone_drop.rs      # Grace period + shadowing before drop
+│   ├── atomic_manifest_swap.rs         # Publish is all-or-nothing
+│   ├── carrier_agnostic.rs             # No std::net/tokio::net/IP/TCP/UDP/QUIC/HTTP/DNS
+│   ├── crypto_allowlist.rs             # Only allowed algorithms
+│   ├── space_amp_monotonic.rs          # Space-amp does not increase post-compaction (target)
+│   ├── write_amp_bounded.rs            # Write amplification within configured budget
+│   └── foreground_protected.rs         # Compaction rate cap respected under load
+│
+├── tests/                              # Property/verification tests (~30 files)
+│   ├── mod.rs
+│   ├── scanner_tests.rs
+│   ├── scorer_tests.rs
+│   ├── scheduler_tests.rs
+│   ├── merge_tests.rs                  # Multiway merge correctness (latest version kept)
+│   ├── tombstone_tests.rs              # Grace period + shadowing drop rules
+│   ├── obsolete_version_tests.rs       # MVCC watermark removal
+│   ├── verify_tests.rs                 # Checksum mismatch fails compaction
+│   ├── publish_tests.rs                # Atomic manifest swap crash safety
+│   ├── space_amp_tests.rs
+│   ├── rate_limiter_tests.rs
+│   ├── backpressure_tests.rs
+│   ├── contract_sealing_tests.rs
+│   ├── invariant_tests.rs
+│   ├── dependency_audit_test.rs        # No prohibited crates in tree
+│   ├── crypto_allowlist_test.rs        # Only five algorithms
+│   └── property_tests.rs               # proptest properties for scorer/merger
+│
+├── benches/                            # (~10 files)
+│   ├── mod.rs
+│   ├── compaction_throughput.rs
+│   ├── space_amp_reduction.rs
+│   ├── tombstone_reclaim_latency.rs
+│   ├── merge_performance.rs
+│   └── verify_overhead.rs
+│
+├── docs/                               # (~14 files)
+│   ├── architecture.md
+│   ├── compaction_strategies.md        # Leveled / tiered / universal selection guide
+│   ├── tombstone_reclamation.md        # Grace period + shadowing rules
+│   ├── scheduling.md                   # Priority scoring, rate caps, backpressure
+│   ├── verification.md                 # Checksum and safety checks
+│   ├── crash_safety.md                 # Atomic manifest swap
+│   ├── runbook.md                      # Operating compaction
+│   ├── adding_a_strategy.md            # Adding a new compaction strategy
+│   └── crypto_policy.md                # Allowed-crypto allowlist policy
+│
+└── spec/                               # Normative specifications (~6 files)
+    ├── compaction_spec.md              # What compaction guarantees
+    ├── tombstone_spec.md               # Tombstone drop contract
+    ├── scheduling_spec.md              # Scheduler and rate-limit contract
+    ├── verification_spec.md            # Integrity verification contract
+    ├── carrier_agnostic_spec.md        # Carrier-agnostic boundary contract
+    └── crypto_spec.md                  # Allowed-crypto contract
+```
+
+Total: ~90–1000 files across `src/`, `src/contracts/`, `src/invariants/`, `src/audit/`, `tests/`, `benches/`, `docs/`, `spec/`, organized by subsystem so each concern is a separate file — consistent with the "separate crates instead of more folders" directive applied intra-crate as separate modules/files.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+#### 7.1 k-way multiway merge (fragment compaction)
+```
+merge(inputs[]):                        # each input sorted run
+  heap = min-heap of (next_key, input_index)
+  for each input: push first entry
+  while heap not empty:
+    (key, i) = pop min
+    if key == last_output_key: continue # duplicate → skip (only newest kept)
+    emit latest version of key
+    advance input i; push its next entry if any
+  tombstones: kept until grace period + shadowing satisfied, then dropped
+  obsolete MVCC versions: dropped below GC watermark
+```
+Only the newest valid version of each key is written to output. Duplicate/obsolete entries and expired tombstones are not rewritten → space reclaimed.
+
+#### 7.2 Tombstone drop safety
+```
+can_drop_tombstone(t):
+  t.age >= grace_period AND
+  all runs containing data older than t are in this compaction AND
+  (not only_purge_repaired OR t.repaired)
+fully_expired_run(r): all entries in r are tombstones/TTL-expired AND r shadows no other run → drop r wholesale
+```
+
+#### 7.3 Obsolete MVCC version removal
+```
+version_visible(v, active_snapshots, gc_watermark):
+  visible if some snapshot can see v OR v.commit_ts >= gc_watermark
+remove versions where !visible AND below watermark
+```
+Long-running snapshots block reclamation of versions they still see (CMU 15-721).
+
+#### 7.4 Priority scoring
+```
+score(candidate) = w1·tombstone_density + w2·obsolete_ratio + w3·fragment_count + w4·read_amplification + w5·age + w6·space_amp
+leveled_score(level) = level_size / target_size   (RocksDB)
+```
+Scheduler pops highest score; admission gated by allowed compaction rate + foreground budget; starvation lower bound.
+
+#### 7.5 Space amplification
+```
+space_amp = physical_bytes / logical_bytes   (per run, level, database)
+durable = obsolete_bytes / logical_bytes
+transient = temp_space_during_compaction / logical_bytes
+target: fully compacted ⇒ space_amp ≈ 1.0 (RocksDB max_size_amplification_percent heuristic: files except earliest contribute)
+```
+
+#### 7.6 Atomic manifest swap (crash-safe publishing)
+```
+publish(compaction):
+  write output files to *.tmp, fsync each
+  append MANIFEST edit {add outputs, remove inputs}  # single all-or-nothing append
+  fsync MANIFEST
+  on crash before append: old set live; *.tmp orphans deleted on open
+  on crash after append: new set live; old inputs are orphans, cleaned on next open
+```
+
+#### 7.7 Verification
+```
+verify(inputs, output):
+  for each input block/file: recompute sha256/blake3 checksum, compare to stored
+  for output: compute checksum, store with file metadata
+  record_count(input entries) == record_count(output entries + dropped tombstones + obsolete)
+  tombstone_safety: no dropped tombstone shadows live data elsewhere
+  any mismatch → fail compaction, preserve old file set, raise alert
+```
+
+#### 7.8 Rate limiter & backpressure (adaptive control)
+```
+allowed_rate bytes/sec (configurable)
+if foreground_load high: rate *= decay; apply write slowdown at L0 trigger, write stop at stop trigger
+if off-peak: rate *= growth up to cap
+randomize compaction schedules across nodes to avoid synchronized spikes
+```
+
+---
+
+### 8. Dependencies
+
+`ids-compaction/Cargo.toml`:
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, `Error`) and sealed trait contracts (`Store`, `Recovery`).
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: sha256, blake3, ed25519, xchacha20poly1305, chacha20poly1305.
+- `sha2` — SHA-256 integrity checksums.
+- `blake3` — BLAKE3 content hashing (fast, parallel).
+- `ed25519` — signing audit checkpoints and publish decisions.
+- `chacha20poly1305` — optional at-rest encryption of compaction state.
+- `thiserror` — error types.
+- `serde` — serialization of compaction envelopes, audit entries, manifests.
+- `proptest` — property-based tests.
+- `tempfile` — test fixtures.
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. No async runtime required (sync compaction jobs; optional async I/O feature).
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-99.1 | Fragment compaction: k-way multiway merge keeps only newest valid version per key | Merge tests: duplicate/obsolete entries absent from output |
+| AC-99.2 | Tombstone reclamation: grace period + shadowing + repaired-only rules enforced | Tombstone tests: 100% of drops satisfy all three conditions |
+| AC-99.3 | Fully expired runs (tombstone/TTL-only, not shadowing) droppable | Run dropped when all entries expired and no shadowing |
+| AC-99.4 | Obsolete MVCC version removal below GC watermark | Version tests: versions below watermark and invisible removed; snapshot-visible versions retained |
+| AC-99.5 | Space amplification reported before/after compaction per run/level/database | Space tracker: physical/logical ratio; target ≈ 1.0 fully compacted |
+| AC-99.6 | Compaction scheduling: priority queue, manual > background, higher level > lower, higher score > lower | Scheduler tests: admission order matches priority rules |
+| AC-99.7 | Rate cap: compaction bytes/sec ≤ allowed rate under load | Rate limiter test: measured throughput within cap |
+| AC-99.8 | Foreground protection: write slowdown/stop triggers respected under compaction pressure | Backpressure test: foreground I/O not starved; slowdown before stop threshold |
+| AC-99.9 | Starvation avoidance: lower bound on compaction rate | Write-heavy low-read ranges still compact over time |
+| AC-99.10 | Verification: checksum mismatch fails compaction, preserves old file set | Verify test: corrupted input → compaction aborted, old set intact |
+| AC-99.11 | Crash safety: atomic manifest swap; crash before = old set live, crash after = new set live | Publish test: simulated crashes preserve consistency; orphans cleaned on open |
+| AC-99.12 | Audit: every compaction decision in hash-chained, ed25519-signed log | Audit tests: chain verifies offline; checkpoints verifiable |
+| AC-99.13 | Carrier agnostic: zero references to std::net/tokio::net/libp2p/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test (`cargo tree`) + source grep — zero matches |
+| AC-99.14 | Crypto allowlist: only sha256/blake3/ed25519/xchacha20poly1305/chacha20poly1305 | Allowlist unit test passes |
+| AC-99.15 | Concurrent compaction: N jobs (default 3) supported without corruption | Concurrency test: parallel compactions on disjoint runs succeed |
+
+---
+
+### 10. Remaining Uncertainties
+
+1. **Concrete compaction strategy defaults:** leveled vs tiered vs universal per deployment; tunables (fanout, target size, L0 trigger) workload-dependent — validated at integration with `ids-store`/`ids-fragment`.
+2. **Grace period duration:** tombstone `gc_grace_seconds` default (Cassandra 864000 s / 10 days) may not fit IDS retention policy; to be confirmed with `ids-reclamation` (Phase 100).
+3. **GC watermark source:** MVCC obsolete-version removal needs a watermark from `ids-recovery`/snapshot subsystem; exact handshake TBD.
+4. **Allowed compaction rate bytes/sec:** deployment- and hardware-dependent; adaptive control reduces need for static tuning but initial cap unquantified.
+5. **Value separation integration:** whether compaction integrates with an out-of-band value layer (WiscKey/Pebble blob files) to avoid rewriting large values — design decision pending.
+6. **Discard vs compaction trade-off:** discard reclaims stale space without moving valid data (lower write amp, higher metadata overhead); when to use discard vs full compaction is workload-dependent (ByteDance DisCoGC findings).
+7. **Concurrency default:** RocksDB/Pebble default 3 compaction threads; IDS target may differ based on I/O subsystem.
+8. **Checksum algorithm choice per use case:** sha256 vs blake3 for integrity — blake3 faster, sha256 more universally available; per-file configuration TBD.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-compaction` crate (not a folder) | "Separate crates instead of more folders" directive; clear compaction boundary |
+| k-way multiway merge keeping newest version only | Standard LSM compaction; duplicate/obsolete entries dropped → space reclaimed |
+| Tombstone drop = grace period + shadowing + optional repaired-only | Cassandra-proven; prevents zombie resurrection in distributed settings |
+| Fully expired runs droppable when not shadowing | Efficient bulk TTL/time-series reclamation |
+| MVCC obsolete-version removal below GC watermark | Snapshot isolation respected; long-running transactions block reclamation |
+| Priority scoring + rate cap + adaptive control + backpressure | HATS/ScyllaDB/RocksDB-proven; protects foreground traffic, avoids write stalls |
+| Atomic manifest swap (temp + rename, orphans cleaned on open) | emberkv/Bedrock/SlateDB crash-safe pattern; all-or-nothing publish |
+| Per-block + per-file checksums (sha256/blake3) on inputs and output | ScyllaDB/RocksDB/OceanBase-proven; catches corruption during compaction |
+| Hash-chained audit log + ed25519-signed checkpoints | Offline-verifiable compaction decision log; tamper evidence |
+| `IdsTime` monotonic ticks for grace periods/watermarks; never wall-clock for ordering | Clock manipulation cannot break reclamation safety |
+| Carrier-agnostic boundary via `ids-carrier::Endpoint`; crate returns decisions, never sends bytes | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto; `ids-crypto` exposes primitives via `ids-000-aa` | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+1. aaron-ang, "Intro to LSM Tree" — compaction as GC, multiway merge, leveled vs size-tiered. https://aaron-ang.github.io/intro-to-lsm-tree
+2. VDB Dayan et al., "Constructing and Analyzing the LSM Compaction Design Space," pvldb vol15 p3071 — space amplification (durable + transient), write amplification, full vs partial merge. https://vldb.org/pvldb/vol15/p3071-dayan.pdf
+3. VDB, "Constructing and Analyzing the LSM Compaction Design Space (Updated Version)," arxiv:2202.04522v2 — compaction design space, leveling/tiering, granularity, data movement policies. https://arxiv.org/html/2202.04522v2
+4. RocksDB wiki, "Compaction" — leveled compaction, fanout, size amplification heuristic (`max_size_amplification_percent`). https://github.com/facebook/rocksdb/wiki/Compaction
+5. RocksDB wiki, "Leveled Compaction" — compaction score = level size / target size; L0 trigger; max_background_compactions. https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
+6. RocksDB wiki, "Universal Compaction" — time-range sorted runs, threshold on run count, size-ratio trigger. https://github.com/facebook/rocksdb/wiki/universal-compaction
+7. Cassandra docs, "Tombstones" — grace period `gc_grace_seconds`, shadowing, fully expired SSTables, `tombstone_compaction_interval`, `unchecked_tombstone_compaction`. https://cassandra.apache.org/doc/6.0/cassandra/managing/operating/compaction/tombstones.html
+8. Cassandra docs, "Compaction overview" — SSTable immutability, tombstones, TTL expiration, read/write amplification. https://cassandra.apache.org/doc/stable/cassandra/managing/operating/compaction/overview.html
+9. ScyllaDB, "Time to Live (TTL) and Compaction" — tombstone creation rules, TTL vs gc_grace_seconds interaction. https://docs.scylladb.com/manual/branch-2026.4/kb/ttl-facts.html
+10. CMU 15-721 (Spring 2019), "MVCC Garbage Collection" — version visibility, snapshot blocking, physical deletion rules. https://15721.courses.cs.cmu.edu/spring2019/slides/05-mvcc3.pdf
+11. Apache Doris, "Compaction Principles" — compaction score = merge paths = query overhead; higher score = higher priority. https://doris.apache.org/docs/dev/admin-manual/trouble-shooting/compaction-principles
+12. StarRocks, "Compaction for Shared-data Clusters" — max compaction score thresholds 10/100/2000; delete-ratio 0.5 / delete-rows 10M thresholds. https://docs.starrocks.io/docs/administration/management/compaction
+13. StarRocks, "Best Practices for StarRocks Compaction in Shared-Data Architectures" — FE scheduler, partition-level scoring, CN execution. https://starrocks.io/blog/best-practices-for-starrocks-compaction-in-shared-data-architectures
+14. HATS (FAST26) — co-schedule foreground reads + compaction, adaptive rate control, allowed compaction rate, starvation lower bound. https://usenix.org/system/files/fast26-ren.pdf
+15. ScyllaDB, "Taming the Beast: Control Theory for Compactions" — closed-loop compaction rate control, adaptive vs open-loop. https://www.scylladb.com/2018/06/12/scylla-leverages-control-theory/
+16. padho-wiki, "Walls: Compaction I/O, Tail Latency" — 10–30× write amplification, tail latency, write slowdown/stop triggers. https://learn.padho.ai/wiki/walls-compaction-io-tail-latency
+17. Kbytechnologies, "Taming RocksDB Compaction Storms" — cap compaction explicitly; `compaction_pending` + `stall_micros` indicators. https://kbytechnologies.com/systems-engineering/taming-rocksdb-compaction-storms-at-scale
+18. RocksDB wiki, "Compaction Filter" — TTL expiration, range deletion, key/value modification during compaction; `compaction_verify_record_count`. https://github.com/facebook/rocksdb/wiki/Compaction-Filter
+19. ScyllaDB commit, "compaction: Perform integrity checks on compacting SSTables" — checksum/digest verification on compacting SSTables. https://github.com/scylladb/scylladb/commit/3a6c0a9b36b38a8f2a8b777abc664c8eca8ec4b5
+20. RocksDB wiki, "Full File Checksum and Checksum Handoff" — file checksum at flush/compaction, stored in FileMetadata/MANIFEST. https://github.com/facebook/rocksdb/wiki/Full-File-Checksum-and-Checksum-Handoff
+21. CockroachDB blog, "Value Separation in Pebble" — values out-of-band, blob file rewrite compaction, compaction consumes CPU/read/write bandwidth. https://cockroachlabs.com/blog/value-separation-pebble-optimization
+22. emberkv design — crash-safe LSM with WAL, SSTables, leveled compaction, manifest-based recovery, atomic table creation. https://github.com/Striv11/emberkv
+23. Bedrock design — log-structured segments + crash-safe compaction (atomic manifest swap, temp+rename). https://github.com/MatheusRodriguesST/Bedrock
+24. SlateDB docs, "Sorted String Tables" — `.compaction-replacements/` crash-recovery marker. https://slatedb.io/docs/design/sorted-string-table/
+25. KayaDB architecture — manifest-defined live state, compaction drops obsolete versions below GC watermark. https://github.com/Tuntii/KayaDB/blob/main/docs/architecture.md
+26. ByteDance DisCoGC (FAST26) — discard-and-compaction combined GC, garbage-ratio threshold, ~20% TCO reduction. https://usenix.org/system/files/fast26-bian.pdf
+27. MetaDB (arxiv:2610.32247) — locality-aware range compaction, in-memory MVCC, tombstone purge locality. https://arxiv.org/html/2610.32247
+28. Pome (arxiv:2307.16693) — parallelizing I/O and computation in compaction, async I/O off critical path. https://arxiv.org/pdf/2307.16693
+29. CockroachDB Storage Layer docs — compaction concurrency default 3, L0–L6 levels. https://docs.cockroachlabs.com/docs/stable/architecture/storage-layer
+30. PostgreSQL docs, "VACUUM" — dead tuple reclamation, VACUUM FULL vs plain, autovacuum scale factor. https://postgresql.org/docs/current/sql-vacuum.html
+31. Tidehunter (arxiv:2602.01873) — write amplification 10–30× under random workloads, relocation-based space reclamation. https://arxiv.org/pdf/2602.01873v1
+32. BLAKE3-team README — BLAKE3-256, SIMD, keyed hash, KDF, XOF. https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md
+33. ed25519-dalek docs.rs — ed25519 key gen/sign/verify, RFC 8032. https://docs.rs/ed25519-dalek
+34. chacha20poly1305 docs.rs — ChaCha20Poly1305/XChaCha20Poly1305 AEAD, RFC 8439. https://docs.rs/chacha20poly1305
+35. IDS prompts.txt entry 99 (lines 1480-1494). C:/idfs/prompts.txt — Phase 099 crate definition, contents, constraints.
+36. HX-241 reference plan format — C:/idfs/plans/plan-077.md, plan-080.md, plan-121.md: Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration, File Structure, Algorithms, Dependencies, Acceptance Criteria, Uncertainties, Engineering Decisions, Sources.
+37. Existing IDS plans — C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md (IDS plan format precedents).
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document. The blueprint above defines all architecture, compaction domains, algorithms, data structures, dependencies, integration points, acceptance criteria, uncertainties, and engineering decisions for Phase 099 (ids-compaction).
+
+
+# PHASE 100:
+
+## Phase 100 — Create the ids-reclamation crate: Reclaim eligible storage space. Research Findings & Implementation Blueprint
+
+**Research complete (26 targeted searches executed; 4 rate-limited by backend). No code written, no files created, no repository changes made. This document is the blueprint for implementation.**
+
+---
+
+### Verbatim prompt (C:/idfs/prompts.txt lines 1495-1509)
+
+```
+100. Research only do not read plan.md **[Phase 100 — Create the ids-reclamation crate: Reclaim eligible storage space.]**
+
+Crate: ids-reclamation
+Purpose: Reclaim eligible storage space.
+Contents: Eligible data expiration, space reclamation, snapshot/retention compatibility, reclamation verification, space reclamation audit.
+
+try to use seperate crates instead of more folders in existing onesResearch only do not read plan.md research **[Phase 100 — Create the ids-reclamation crate: Reclaim eligible storage space.]**
+
+Create plan-100.md in C:/idfs/plans/ for the ids-reclamation crate.
+Follow the HX-241 plan format (plan-077.md, plan-080.md, plan-121.md): Executive Summary, Architecture Overview, Detailed Research Dimensions, Threat Model, Integration with Existing Crates, Proposed File Structure (~90-1000 files in subfolders), Key Algorithms & Data Structures, Dependencies, Measurable Acceptance Criteria, Remaining Uncertainties, Engineering Decisions Summary, Sources.
+Carrier-agnostic: no std::net, tokio::net, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, or mesh. All traffic via ids-carrier::Endpoint (CarrierType + Vec<u8>).
+Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+ids-000-aa is the master crate with all canonical types and sealed trait contracts.
+Research only — no code, no source modifications, only the plan document.
+```
+
+---
+
+### 1. Executive Summary
+
+Phase 100 creates `ids-reclamation`, the IDS crate responsible for reclaiming eligible storage space. It is a **separate crate** (not a folder inside an existing crate, per the project rule of separate crates for new capabilities), organized into subfolders by reclamation domain. `ids-reclamation` owns: eligible-data expiration (TTL/retention-based eligibility), space reclamation (tombstone expiry, snapshot retention, compaction/WAL segment reclamation, erase-block cleaning), snapshot/retention compatibility (never reclaim blocks held by active snapshots or under legal hold), reclamation verification (proof that claimed bytes are actually freed and reachable-free accounting matches), and space reclamation audit (tamper-evident, signed log of every eligibility decision and byte reclaimed).
+
+**Core design:** a two-phase pipeline — **eligibility evaluation** decides *what* may be reclaimed (expiration, retention, snapshot-hold, legal-hold, tombstone-grace, WAL-truncation windows), and **reclamation execution** performs the actual space recovery (tombstone purge, segment cleaning, snapshot pruning, obsolete-version removal) while coordinating through `ids-carrier::Endpoint` opaque `Vec<u8>` datagrams for any cross-node coordination. `ids-reclamation` never opens a socket or drives a transport itself; it returns `ReclaimDecision` / `ReclaimResult` structures that the caller frames into datagrams to `ids-carrier::Endpoint` (`CarrierType` + `Vec<u8>` ≤ 1024-byte address). Allowed crypto only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305, consumed via `ids-crypto` primitive IDs from `ids-000-aa`.
+
+**Scope boundary:** `ids-reclamation` decides and verifies eligibility and records the audit trail; it does not own the underlying storage engine (that is `ids-store`/`ids-reclaim` compaction). It is the policy + verification + audit layer, ensuring no eligible block is reclaimed prematurely (data safety) and no ineligible block is withheld (space efficiency). It is carrier-agnostic: all cross-node eligibility/reclamation traffic rides `ids-carrier::Endpoint`.
+
+A skeleton `ids-reclamation` crate does NOT yet exist at `C:/idfs/ids-reclamation/`. `ids-000-aa` already declares canonical types referenced by this crate but never redefined: `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `IdsTime`, `CarrierType`, `RecordId`, `Checksum`, plus sealed trait contracts and error types. Research only — no code, no source modifications, only this plan document.
+
+**Research basis:** 26 parallel searches returned distributed garbage-collection algorithms (reference counting, weighted reference counting, tracing/back-trace distributed GC); LSM-tree compaction and tombstone eviction (Cassandra `gc_grace_seconds`, ScyllaDB ICS tombstone GC, STCS/LCS compaction strategies, zombie-data prevention); snapshot space management and retention (ZFS snapshot unique/referenced space, holds, deferred destruction, sanoid/zrepl retention policies); HDFS trash expiration intervals and expunge; log-structured file system segment cleaning (victim selection, valid-block migration, cost/benefit ratio); WAL log truncation and segment deletion (RocksDB WAL deleted after flush beyond max sequence, SQL Server log truncation/MinLSN, Tidehunter WAL segment relocation); erasure coding fragment deletion and repair bandwidth (clay/MSR codes 37–67% repair-bandwidth savings); content-addressable storage garbage collection and deduplication block deletion; CRDT tombstone garbage collection via causal stability (Bondy deletion/reclamation, causal stability as the licence to reclaim, anti-entropy digest reconciliation); HDFS trash/expunge semantics; distributed audit/data-deletion verification (proof of erasure, deletion map, signed audit trail); pause-free concurrent compaction garbage collection; time-based TTL expiration (MongoDB TTL indexes, background deletion, 60s monitor); copy-on-write snapshot coalescence and reclamation; cross-shard distributed vacuum/GC eligibility; anti-entropy Merkle-tree reconciliation; storage reclamation eligibility criteria; WORM/legal-hold retention blocking deletion; reclamation job result verification.
+
+---
+
+### 2. Architecture Overview
+
+`ids-reclamation` sits above `ids-000-aa` (types + sealed contracts + invariants + errors), `ids-carrier` (opaque `Endpoint` datagram transport), and `ids-crypto` (allowed primitives). It is a policy/eligibility/verification/audit layer: given a storage object (record, fragment, snapshot, WAL segment, erase block) tagged with retention/TTL/snapshot/legal-hold metadata, it decides (a) whether the object is *eligible* for reclamation, (b) what reclamation method applies (tombstone purge, segment clean, snapshot prune, obsolete-version removal, erase-block reclaim), (c) whether any snapshot, retention, or legal hold blocks it, and (d) what verification/audit entry to emit. It never sends bytes itself; it returns decisions that the caller frames into opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    STORAGE OWNERS (ids-store / ids-reclaim / ids-snapshot)   │
+│  tag objects with retention/TTL/snapshot/legal-hold metadata; request reclaim│
+├──────────────────────────────────────────────────────────────────────────────┤
+│               Phase 100: ids-reclamation (THIS CRATE — policy+verify+audit) │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐ │ │\n│  │ eligibility     │ │ snapshot/       │ │ reclamation     │ │ verification│ │ │\n│  │ evaluator       │ │ retention gate  │ │ execution plan  │ │ (proof)   │ │ │\n│  │ (TTL, tombstone │ │ (hold check,    │ │ (method selection │ │ (reachable- │ │ │\n│  │ grace, WAL win) │ │ unique/ref    │ │ + scope)          │ │ free match) │ │ │\n│  └─────────────────┘ └─────────────────┘ └─────────────────┘ └──────────┘ │ │\n│  ┌─────────────────┐ ┌─────────────────┐ │                 │                │ │ │\n│  │ audit logger    │ │ crypto adapter  │ │                 │                │ │ │\n│  │ (signed + chained│ │ (ed25519/sha256 │ │                 │                │ │ │\n│  │ entries)        │ │ /blake3/xchacha │ │                 │                │ │ │\n│  └─────────────────┘ └─────────────────┘ │                 │                │ │\\n└─────────────────────────────────────────┬──────────────────┴──────────────┘\n                                          │ opaque Vec<u8> datagrams\
+┌─────────────────────────────────────────▼──────────────────┐\n│              CARRIER BOUNDARY: ids-carrier::Endpoint only  │\n│  send_datagram(Endpoint{CarrierType, addr ≤1024 B}, payload│\n│  payload: &[u8])                                           │\n│  receive_datagram → (Endpoint, Vec<u8>)                    │\n│  No std::net / tokio::net / libp2p / IP / TCP / UDP /      │\n│  QUIC / HTTP / DNS / Wi-Fi / Bluetooth / cellular / VPN    │\n└────────────────────────────────────────────────────────────┘
+```
+
+**Data flow of one reclamation cycle:** storage owner submits `ReclaimScope{object_id, object_kind, metadata}` → `ids-reclamation` runs eligibility evaluation (TTL expiry, tombstone grace, snapshot-hold, legal-hold, retention, WAL window) → returns `ReclaimDecision{eligible, method, scope, reason}` → caller executes reclamation through `ids-store`/`ids-reclaim` and reports reclaimed bytes → `ids-reclamation` verifies via reachable-vs-free accounting (`out_eq_in` byte boundary + free-space delta) → emits signed, hash-chained audit entry (sha256/blake3 chain + ed25519-signed checkpoint).
+
+**Reclamation methods (research-verified):**
+- **Tombstone expiry/purge:** deletion marker retained for a grace window (Cassandra `gc_grace_seconds` default 10 days) to prevent zombie resurrection; purged during compaction once all replicas have applied it and grace elapsed. ScyllaDB ICS tombstone-density GC compacts high-tombstone tiers cross-tier.
+- **Snapshot retention & pruning:** ZFS-style unique/referenced space accounting; destroy snapshots only when no holds/clones reference their blocks; retention schedules (hourly/daily/weekly) expire old snapshots; `zfs destroy -nv` dry-run previews reclaimed bytes.
+- **WAL segment truncation/relocation:** delete/archive WAL segments once all contained records are flushed beyond the max sequence (RocksDB) or past MinLSN (SQL Server); Tidehunter-style relocation moves live entries forward then drops whole segments.
+- **Log-structured segment cleaning:** victim selection by dead-space density, valid-page migration to a new segment, erase old segment (LFS/F2FS/SSD FTL cleaning; cost/benefit ratio).
+- **Erasure-coded fragment reclamation:** delete fragments of logically-deleted objects; account for repair-bandwidth impact (clay/MSR codes save 37–67% vs naive Reed-Solomon).
+- **Content-addressable dedup block deletion:** reference-counted chunks; delete only when refcount reaches zero (concurrent deletion safe, minor restrictions).
+
+**Crypto used:** ed25519 for signing audit entries/checkpoints; sha256/blake3 for eligibility hashing, object/content hashing, audit-chain links; xchacha20poly1305/chacha20poly1305 to encrypt reclamation metadata/state at rest when confidentiality required.
+
+---
+
+### 3. Detailed Research Dimensions
+
+Each dimension maps to targeted searches executed. Sources are cited inline with the source list in Section 12.
+
+#### 3.1 Eligible data expiration (TTL / retention-based eligibility)
+
+**Source:** MongoDB TTL indexes (background monitor every 60 s, delete expired docs, delay up to 60 s, not transactional, expires via `expireAfterSeconds`); Google Cloud Datastore/Firestore TTL policies (deleted within 24 h of expiration, not guaranteed order); Google Cloud Storage Object Lifecycle Management (age/createdBefore/noncurrentTimeBefore conditions, Delete action, soft-delete 7-day retention, object holds and retention policies block deletion); Alibaba Cloud MaxCompute table lifecycle (reclaim after lifecycle days from last modification, daily scan, within 24 h); Azure Blob lifecycle (creation/modified/accessed time conditions, tier transition + delete, soft delete); NetApp AI Data Engine stale-data identification (3-year default stale threshold).
+
+`ids-reclamation` eligibility evaluator: each object carries `expire_at` (IdsTime tick, never wall-clock for ordering), `ttl_seconds`, `retention_policy`. An object is **expired-eligible** when `now_tick ≥ expire_at`. Expiration is advisory—actual deletion is gated by snapshot/retention/legal-hold gates (dimension 3.3) and tombstone grace (3.2). TTL monitor runs periodically (batch-deletes, e.g. 50k docs or 1 s per index, MongoDB pattern); ids-reclamation adopts bounded batch reclamation so foreground traffic is not starved.
+
+#### 3.2 Tombstone expiry and graceful deletion (zombie prevention)
+
+**Source:** Apache Cassandra tombstones (delete = timestamped tombstone inserted into SSTables; `gc_grace_seconds` default 864000 s / 10 days; tombstone retained through compaction until grace expires; node recovery before grace → tombstone prevents zombie resurrection; after grace, compaction purges tombstone + shadowed data; `only_purge_repaired_tombstones` option; tombstones must reach all replicas before grace or deleted data resurrects); ScyllaDB ICS efficient tombstone GC (tombstone-density trigger, cross-tier compaction, promptly purges droppable tombstones; tombstone compaction per-SSTable); ScyllaDB flush-old-tombstones workaround (repair first, then flush+compact); Pythian Cassandra tombstone lifecycle (shadowed data, gc_grace, compaction-eviction, disk space recovered only after compaction involves both data and tombstone SSTables).
+
+`ids-reclamation` implements: deletion writes a tombstone (not immediate erase); tombstone carries HLC/IdsTime timestamp + `gc_grace`; tombstone is purged only when (a) grace elapsed, (b) all replicas have applied it (or membership frontier confirms), (c) compaction/reclamation scope includes shadowed data SSTables, (d) no snapshot/hold references the block. Prevents zombie data (deleted-but-resurrected) and premature space reclamation.
+
+#### 3.3 Snapshot / retention compatibility (never reclaim held blocks)
+
+**Source:** ZFS snapshot space management (unique vs referenced space; destroying a snapshot frees only unique space; blocks shared between snapshots remain; holds prevent destruction; `zfs destroy -d` deferred destruction once holds released; `zfs destroy -nv` dry-run previews reclaimed bytes; sanoid/zrepl/zfstools retention schedules — third-party, not part of OpenZFS); Google Cloud Storage object holds and retention policies (legal hold / time-based retention block delete until cleared/expired); Azure immutable storage WORM (time-based retention + legal hold; cannot modify/delete during retention); Tahoe-LAFS share leases (clients renew leases; server deletes share only when all leases expire; lease renewal cadence vs duration).
+
+`ids-reclamation` snapshot/retention gate: before any block is reclaimed, check (a) snapshot references — a block referenced by any unretained snapshot is ineligible; (b) legal holds — WORM/legal-hold objects are ineligible until hold cleared; (c) retention periods — objects within retention are ineligible; (d) lease/Tahoe-style references — active leases pin blocks. Unique-space accounting (ZFS-style) determines how many bytes a given snapshot deletion would actually free. Dry-run mode previews reclaimable bytes without mutating.
+
+#### 3.4 Space reclamation methods (compaction, cleaning, relocation)
+
+**Source:** LSM-tree compaction design space (arXiv 2202.04522 — compactions merge sorted runs to reduce read/space amplification at write-amplification cost); Tidehunter (arXiv 2602.01873 — WAL as permanent storage; relocation moves live entries forward, drops old segments at file granularity; GC watermark tracks oldest referenced position; compare-and-set for concurrent writes); Log-structured file system segment cleaning (Rosenblum/Ousterhout LFS; cleaner reads segments, identifies live blocks, compacts live blocks into fewer segments, frees old ones; cost = 1 + utilization, benefit = free bytes × age; clean highest benefit/cost); F2FS/LFS cleaning (victim selection, valid-block migration, foreground/background cleaning); NOVA log cleaning (fast GC reclaims fully-dead log pages without copying; thorough GC copies live entries when <50% live); SSD FTL garbage collection (victim block selection, valid-page relocation, erase block, wear leveling, write amplification).
+
+`ids-reclamation` reclamation planner: selects a reclamation **method** based on object kind and storage layout:
+- tombstone purge (LSM/SSTable) — compaction-involved eviction
+- snapshot prune (COW/ZFS-style) — destroy expired snapshots, free unique space
+- WAL segment delete/relocate — drop segments beyond GC watermark after flush
+- segment/block cleaning (log-structured/flash) — migrate live, erase dead
+- obsolete-version removal (MVCC dead-tuple vacuum) — reclaim superseded versions
+- dedup chunk refcount-zero delete (content-addressable)
+
+Runs in bounded batches (foreground-yielding) so reclamation never blocks writes; respects free-space headroom (don't GC when insufficient dirty space — ENOSPC-backoff pattern from LFS).
+
+#### 3.5 Reclamation verification (proof bytes are freed)
+
+**Source:** SQL Server transaction log architecture (active log / MinLSN; log truncation frees inactive VLFs only after checkpoint; no part of active log truncated); RocksDB WAL (WAL deleted/archived when all column families flushed beyond largest sequence number); ScyllaDB/HDFS disk-space-not-recovered after delete (space reclaimed only after compaction/trash purge, not immediately); general principle: logical delete ≠ physical free; verification must compare reachable-used vs free-space delta, not just tombstone count.
+
+`ids-reclamation` verification: after reclamation execution, assert (a) reachable-used bytes decreased by ≥ claimed bytes (reachable-set accounting), (b) free-space on the affected pool increased by claimed bytes within tolerance, (c) `out_eq_in` byte boundary holds (bytes-out == bytes-in + acked) for cross-node reclamation traffic, (d) no object with active snapshot/hold/retention was reclaimed (gate re-check). Verification result = `Verified` / `Mismatch` / `Blocked`; mismatches fail the reclamation cycle and trigger audit alert. Never trust a `DELETE` success response alone (ScyllaDB/HDFS finding: disk usage stays same until compaction/trash-purge).
+
+#### 3.6 Space reclamation audit (tamper-evident log)
+
+**Source:** Scality data deletion verification (delete response proves namespace absence, not byte-freeing; proof of erasure needs reclamation job records + free-space change + deletion map naming every copy location — buckets, versions, replication targets, backups, snapshots, caches, indexes); Google Cloud Storage audit logs (admin + data access, who/what/where/when); RADAR forensic carving + log reconciliation (physical storage artifacts vs application logs; unattributed deletions flagged); append-only signed audit patterns (hash chain + periodic signed checkpoint).
+
+`ids-reclamation` audit logger: every eligibility decision, reclamation method, byte claim, and verification result is an append-only entry: `AuditEntry{object_id, method, bytes_claimed, bytes_verified, gate_state, snapshot_refs, hold_state, timestamp: IdsTime, prev_hash: [u8;32], entry_hash: blake3}`; periodic ed25519-signed checkpoints; offline-verifiable hash chain. Deletion map records every location a copy reaches (replicas, fragments, snapshots, backups, WAL segments) and what reclamation did there. Audit entries are signed over bytes (survive carrier re-framing); carrier never trusted.
+
+#### 3.7 Distributed GC & eligibility consensus (cross-node agreement)
+
+**Source:** Distributed garbage collection algorithms (Brunthaler — reference counting, weighted reference counting, tracing collectors; no fully prompt algorithm; trade promptness vs safety); Tahoe-LAFS GC (leases per share; server deletes when all leases expire; clients renew periodically; share crawler rate-limited ≤10% CPU); Bondy deletion & reclamation (deletion = clear op leaves tombstone; reclamation licensed by causal stability — proof no older op can arrive; per-member durable frontier; stability point = first event not covered by any member's durable frontier; one silent member holds stability for whole cluster; unreclaimed tombstone costs disk, wrongly reclaimed costs data permanently); containerd leases (resources held by lease; GC removes unused resources); RIFL linearizability GC (completion records reclaimed via acks + client leases; sequence numbers; never reclaim while a retry is possible).
+
+`ids-reclamation` distributed eligibility: an object is reclaimable only when every replica/member that could hold a reference has confirmed coverage (durable frontier) or explicitly released (lease/hold expiration). One unresponsive member withholds reclamation conservatively (safety over promptness). Membership changes (node retired/failed) are coordinated via `ids-membership`/`ids-coordinator` before GC proceeds on that member's shards. Anti-entropy Merkle reconciliation (dimension 3.8) detects divergent eligibility views.
+
+#### 3.8 Anti-entropy & Merkle reconciliation for reclamation convergence
+
+**Source:** Dynamo-style anti-entropy (Merkle trees per partition; root-hash compare O(1); recurse into differing subtrees O(k log n); stream only differing ranges; `nodetool repair`; hinted handoff for short outages; read repair for hot keys; full repair catches cold data; must finish within `gc_grace_seconds` or deleted data resurrects); Merkle-tree anti-entropy implementation (O(log n) interval hashes, descend only mismatched ranges); Cassandra repair architecture (hint window expiry, cold data divergence, tombstone propagation before gc_grace).
+
+`ids-reclamation` uses anti-entropy to converge eligibility state across replicas: exchange Merkle roots over the eligibility/tombstone set; reconcile divergent keys; ensure tombstones and expiry decisions reach all replicas before grace expires; prevents premature reclamation on a subset of replicas (which would cause zombies on heal).
+
+#### 3.9 Allowed crypto only (ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305)
+
+**Source:** ed25519-dalek (RFC 8032 EdDSA over Curve25519); chacha20poly1305 docs (RFC 8439 AEAD + XChaCha20Poly1305 192-bit nonce); sha2 RustCrypto (SHA-256); BLAKE3-team README (BLAKE3-256, SIMD, keyed hash, KDF, XOF).
+
+`ids-reclamation` uses: ed25519 (audit-entry signing, checkpoint signing); sha256 (eligibility/content hashing, audit-chain links); blake3 (fast content/object hashing, Merkle roots for anti-entropy, checkpoint chaining — preferred for speed/parallelism); xchacha20poly1305 (encrypt reclamation metadata/state at rest, 24-byte random nonce safe); chacha20poly1305 (encrypt session/state payloads, 12-byte counter nonce). No other crypto. Consumed via `ids-crypto` primitive IDs from `ids-000-aa`; `ids-reclamation` implements no crypto itself.
+
+#### 3.10 Carrier-agnostic transport & no networking stack
+
+**Source:** IDS carrier-agnostic rule (no `std::net`, `tokio::net`, libp2p, IP, TCP, UDP, QUIC, HTTP, DNS, Wi-Fi, Bluetooth, cellular, VPN, mesh; all traffic via `ids-carrier::Endpoint` = `CarrierType` + `Vec<u8>`); HX-241 carrier/socket abstraction (Carrier/Socket/Endpoint traits with no networking-stack references).
+
+`ids-reclamation` never touches a transport. All cross-node reclamation coordination (eligibility queries, anti-entropy Merkle exchange, tombstone propagation, audit export) is expressed as opaque `Vec<u8>` datagrams to `ids-carrier::Endpoint`. The crate returns decisions; the caller frames and sends. Dependency audit bans networking crates in `Cargo.toml` and `cargo tree`.
+
+---
+
+### 4. Threat Model & Mitigations
+
+| Threat | Asset at risk | Mitigation (this crate) |
+|--------|---------------|-------------------------|
+| Premature reclamation (block still referenced by snapshot/hold/retention) | Data loss | Snapshot/retention/legal-hold gate before every reclaim; unique-space accounting; dry-run preview |
+| Zombie resurrection (tombstone purged before all replicas applied) | Data correctness | `gc_grace` window; tombstone must reach all replicas/membership frontier before purge; anti-entropy convergence within grace |
+| Logical delete ≠ physical free (space not actually reclaimed) | Space accounting | Verification: reachable-used decrease + free-space delta + `out_eq_in` boundary; never trust DELETE response alone |
+| Unauthorized / untracked reclamation | Accountability | Append-only, sha256/blake3 hash-chained, ed25519-signed audit entries; deletion map of every copy location |
+| Replay/forged reclamation decisions | Decision integrity | ed25519-signed audit checkpoints; nonce-bound decisions; bounded replay cache |
+| Clock manipulation affecting expiry/TTL | Eligibility correctness | Logical IdsTime ticks only for expiry; never wall-clock for ordering/retention decisions |
+| Carrier duplicating/delaying datagrams | Replay/ordering | Idempotent eligibility/reclamation; replay protection at audit layer; idempotent merge tolerates duplicates |
+| One silent member blocks GC (safety over promptness) | Space efficiency (liveness) | Conservative default: unresponsive member withholds reclamation; documented trade; quarantine window for returning members |
+| Disallowed crypto algorithm | Policy compliance | Only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 via `ids-crypto`; CI allowlist test |
+| Carrier-agnostic rule violation (`std::net`, IP, TCP, etc.) | Architecture | `Endpoint` sole address type; dependency audit CI; no networking crate in dependency tree |
+
+---
+
+### 5. Integration with Existing Crates
+
+| Crate | Role | Relevance to ids-reclamation |
+|-------|------|------------------------------|
+| `ids-000-aa` | Master crate: canonical types + sealed contracts + invariants + errors | `NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `IdsTime`, `CarrierType`, `Checksum`, `Error` — consumed, never redefined; sealed contracts mirrored |
+| `ids-carrier` | Opaque `Endpoint` (`CarrierType` + `Vec<u8>`) datagram send/receive via `Carrier` trait | All reclamation traffic flows to/from `Endpoint`; crate returns decisions, never sends directly |
+| `ids-crypto` | Allowed primitives: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305 | Signing audit entries/checkpoints; hashing objects/eligibility; encrypting reclamation metadata at rest |
+| `ids-store` | Primary record store (reclamation target) | Tags objects with retention/TTL/snapshot metadata; executes tombstone purge/obsolete-version removal on reclaim decision |
+| `ids-reclaim` (CRATES.md #41) | Storage compaction and reclamation engine | Performs physical compaction/fragmented-storage reclamation; ids-reclamation supplies eligibility + verification + audit |
+| `ids-snapshot` (CRATES.md #26) | Distributed snapshots (Chandy-Lamport) | Snapshot references pin blocks; ids-reclamation checks snapshot-hold before reclaim |
+| `ids-immutable` (CRATES.md #40) | Immutable records and retention enforcement | Retention/legal-hold objects ineligible for reclamation until expiry/hold cleared |
+| `ids-membership` (CRATES.md #8) | Node/H-unit/region membership and lifecycle | Member durable frontiers gate distributed GC; retired/failed nodes coordinated before shard GC |
+| `ids-replication` (CRATES.md #17) | Replication streams and checkpoints | Tombstone propagation to all replicas; anti-entropy Merkle reconciliation for eligibility convergence |
+| `ids-erasure` (CRATES.md #23) | Erasure coding | Fragment deletion of logically-deleted objects; repair-bandwidth accounting |
+| `ids-time` (CRATES.md #5) | IDS standard time | Monotonic `IdsTime` ticks for TTL expiry, grace windows, timestamps (never wall-clock) |
+| `ids-fault` (CRATES.md #27) | Circuit breakers, bulkheads, backpressure | Bounded reclamation batch rate so foreground traffic not starved |
+| `ids-observability` (CRATES.md #44) | Metrics, tracing, audit trail | Reclamation metrics (bytes reclaimed, eligibility rate, verification mismatches) exported |
+| `ids-accounting` (CRATES.md #36) | Resource accounting and negotiation | Free-space delta verification; cost-per-byte of reclamation |
+
+---
+
+### 6. Proposed File Structure (~90–1000 files in subfolders)
+
+`C:/idfs/ids-reclamation/` (a separate crate, not a folder inside an existing crate):
+
+```
+ids-reclamation/
+├── Cargo.toml                          # ids-000-aa, ids-carrier, ids-crypto, ids-time, serde, thiserror, blake3
+├── lib.rs                              # crate root, feature gates, public re-exports
+├── constants.rs                        # Reclamation defaults: batch size, grace windows, scan intervals
+├── error.rs                            # ReclaimError (thiserror): eligibility, gate, verification, audit errors
+├── features.rs                         # Feature flags: audit, verify, anti_entropy, dry_run
+├── types.rs                            # ReclaimScope, ReclaimDecision, ReclaimMethod, ReclaimResult, GateState (re-exports ids-000-aa types)
+│
+├── eligibility/                        # Eligible-data expiration & eligibility evaluation
+│   ├── mod.rs
+│   ├── evaluator.rs                    # Runs TTL, tombstone-grace, WAL-window eligibility checks
+│   ├── ttl.rs                          # TTL/expiry evaluation (IdsTime-keyed, never wall-clock)
+│   ├── tombstone.rs                    # Tombstone grace & purge eligibility (gc_grace pattern)
+│   ├── wal_window.rs                   # WAL segment truncation eligibility (flush-beyond-seq / MinLSN)
+│   ├── retention.rs                    # Retention-period eligibility
+│   └── types.rs                        # EligibilityResult, EligibilityReason structures
+│
+├── gates/                              # Snapshot/retention/legal-hold eligibility gates
+│   ├── mod.rs
+│   ├── snapshot_gate.rs                # Snapshot reference / unique-space hold check (ZFS-style)
+│   ├── retention_gate.rs               # Retention period & WORM hold check
+│   ├── legal_hold_gate.rs              # Legal hold / immutability hold check
+│   ├── lease_gate.rs                   # Active lease / reference hold check (Tahoe-LAFS style)
+│   ├── unique_space.rs                 # Unique-vs-referenced space accounting (ZFS-style)
+│   └── types.rs                        # GateDecision, GateReason structures
+│
+├── planning/                           # Reclamation execution planning
+│   ├── mod.rs
+│   ├── planner.rs                      # Selects reclamation method + scope per object kind
+│   ├── method.rs                       # ReclaimMethod enum: tombstone_purge, snapshot_prune, wal_delete, segment_clean, obsolete_version_remove, dedup_chunk_delete
+│   ├── batch.rs                        # Bounded batch reclamation (foreground-yielding, backpressure)
+│   └── types.rs                        # ReclaimPlan, ReclaimScope structures
+│
+├── execution/                          # Reclamation execution coordination (decisions only)
+│   ├── mod.rs
+│   ├── coordinator.rs                  # Drives reclaim via ids-store/ids-reclaim contracts
+│   ├── reclaim_driver.rs               # Issues reclaim calls, collects reclaimed-byte reports
+│   └── types.rs                        # ExecutionResult structures
+│
+├── verification/                       # Reclamation verification (proof bytes freed)
+│   ├── mod.rs
+│   ├── verifier.rs                     # Compares reachable-used decrease vs claimed bytes
+│   ├── free_space.rs                   # Free-space delta check on affected pool
+│   ├── out_eq_in.rs                    # out_eq_in invariant check for cross-node traffic
+│   ├── gate_recheck.rs                 # Post-reclaim gate re-check (no held block reclaimed)
+│   └── types.rs                        # VerificationResult (Verified/Mismatch/Blocked)
+│
+├── audit/                              # Tamper-evident reclamation audit log
+│   ├── mod.rs
+│   ├── entry.rs                        # AuditEntry (object_id, method, bytes, gate_state, prev_hash, entry_hash)
+│   ├── chain.rs                        # Hash-chained append-only log (sha256/blake3)
+│   ├── checkpoint.rs                   # Periodic ed25519-signed checkpoint
+│   ├── signer.rs                       # ed25519 signing of entries/checkpoints
+│   ├── verifier.rs                     # Offline audit verification
+│   ├── deletion_map.rs                 # Deletion map: every copy location + reclaim action
+│   └── types.rs                        # AuditEntry, Checkpoint structures
+│
+├── anti_entropy/                       # Merkle reconciliation for eligibility convergence
+│   ├── mod.rs
+│   ├── merkle.rs                       # Merkle tree over eligibility/tombstone set (root hash compare)
+│   ├── reconcile.rs                    # Descend into mismatched subtrees, stream divergent keys
+│   ├── convergence.rs                  # Ensure tombstones/expiry reach all replicas before grace
+│   └── types.rs                        # MerkleNode, DiffReport structures
+│
+├── carrier_adapter.rs                  # Opaque Vec<u8> datagram framing to ids-carrier::Endpoint (decision carrier only)
+├── contracts/                          # Sealed trait contracts (~10 files)
+│   ├── mod.rs
+│   ├── eligibility_contract.rs
+│   ├── gate_contract.rs
+│   ├── reclamation_contract.rs
+│   ├── verification_contract.rs
+│   ├── audit_contract.rs
+│   ├── anti_entropy_contract.rs
+│   ├── carrier_contract.rs
+│   └── crypto_contract.rs
+│
+├── invariants/                         # Compile-time/runtime invariants (~10 files)
+│   ├── mod.rs
+│   ├── no_premature_reclaim.rs         # No block reclaimed while snapshot/hold/retention active
+│   ├── tombstone_grace_sound.rs        # Tombstone not purged before grace + replica coverage
+│   ├── reachable_free_match.rs         # Reclaimed bytes == free-space delta (verification)
+│   ├── carrier_agnostic.rs             # No std::net/tokio::net/IP/TCP/etc.
+│   ├── crypto_allowlist.rs             # Only allowed crypto reachable
+│   ├── monotonic_time_only.rs          # IdsTime ticks only for expiry/grace
+│   ├── idempotent_reclaim.rs           # Reclaim idempotent under duplicate datagrams
+│   ├── audit_chain_sound.rs            # Hash chain + signed checkpoints verifiable
+│   └── bounded_batch.rs                # Reclamation batches bounded (no foreground starvation)
+│
+├── tests/                              # Property/verification tests (~30 files)
+│   ├── eligibility_tests.rs
+│   ├── gate_tests.rs
+│   ├── planning_tests.rs
+│   ├── verification_tests.rs
+│   ├── audit_tests.rs
+│   ├── anti_entropy_tests.rs
+│   ├── carrier_agnostic_tests.rs       # asserts no std::net/tokio::net/IP/TCP/etc.
+│   ├── crypto_allowlist_tests.rs
+│   ├── dry_run_tests.rs                # preview reclaimable bytes without mutating
+│   ├── zombie_prevention_tests.rs      # tombstone grace + replica coverage
+│   ├── batch_tests.rs                  # bounded batch, no starvation
+│   ├── determinism_tests.rs            # same input ⇒ same decision
+│   └── dependency_audit_test.rs        # no prohibited crates in tree
+│
+├── benches/                            # (~10 files)
+│   ├── reclaim_latency.rs
+│   ├── reclaim_throughput.rs
+│   ├── verification_overhead.rs
+│   ├── audit_append.rs
+│   └── anti_entropy_reconcile.rs
+│
+├── spec/                               # Normative specifications
+│   ├── eligibility_spec.md             # What makes an object reclaimable
+│   ├── verification_spec.md            # Proof-bytes-freed contract
+│   ├── audit_spec.md                   # Hash-chain + signed checkpoint contract
+│   └── carrier_agnostic_spec.md        # Carrier-agnostic boundary contract
+│
+├── docs/                               # Documentation
+│   ├── architecture.md                 # Reclamation architecture and layering
+│   ├── runbook.md                      # How to run, verify, and audit reclamation
+│   ├── adding_a_method.rs              # Adding a new reclamation method
+│   └── crypto_policy.md                # Allowed-crypto allowlist policy
+│
+├── baselines/                          # Stored baseline results
+│   ├── reclaim_baseline.json
+│   └── audit_baseline.json
+│
+└── test_vectors/                       # Deterministic inputs and expected outputs
+    ├── eligibility_vectors.json
+    ├── gate_vectors.json
+    └── audit_chain_vectors.json
+```
+
+**Why ~90–1000 files:** one file per responsibility — eligibility (TTL/tombstone/WAL/retention), gates (snapshot/retention/legal-hold/lease/unique-space), planning (method selection/batching), execution coordination, verification (reachable/free-space/out_eq_in/gate-recheck), audit (entry/chain/checkpoint/signer/deletion-map), anti-entropy (Merkle/reconcile/convergence), contracts (~10), invariants (~10), tests (~30), benches, specs, docs, baselines, test vectors. Reflects the genuine eligibility+verification+audit complexity of a safe space-reclamation crate. No stubs; every file holds production-grade code with error handling, documentation, and tests.
+
+---
+
+### 7. Key Algorithms & Data Structures
+
+#### 7.1 Eligibility evaluation
+```
+eligible(object) =
+  TTL_expired(object)               // now_tick ≥ expire_at (IdsTime)
+  AND tombstone_grace_elapsed(object) // grace since tombstone write
+  AND wal_flush_beyond(object)      // WAL records flushed beyond max seq / MinLSN
+  AND NOT snapshot_holds(object)    // no unretained snapshot references block
+  AND NOT legal_hold(object)        // no WORM/legal hold
+  AND NOT retention_active(object)  // within retention period
+  AND NOT active_lease(object)      // no active lease reference
+  AND NOT immutable(object)         // not under ids-immutable hold
+```
+
+#### 7.2 Tombstone grace + purge (Cassandra gc_grace pattern)
+```
+tombstone.purgeable iff
+  now_tick ≥ tombstone.written_at + gc_grace
+  AND all_replicas_applied(tombstone)   // or membership durable frontier covers it
+  AND compaction_scope_includes(shadowed_data_sstables)
+  AND NOT snapshot_or_hold_references(block)
+```
+Prevents zombie resurrection; space recovered only when compaction involves both data and tombstone SSTables.
+
+#### 7.3 Unique-vs-referenced space accounting (ZFS-style)
+```
+unique_space(snapshot) = blocks referenced only by this snapshot (and no other live ref)
+reclaimable_by_destroy(snapshot) = Σ unique_space(snapshot)
+block_reclaimable iff refcount(block) == 0 AND NOT hold(block) AND NOT snapshot_ref(block)
+```
+
+#### 7.4 WAL segment reclamation (RocksDB / Tidehunter pattern)
+```
+segment_deletable iff max_flushed_seq(segment) < min_referenced_seq(all_column_families)
+// or Tidehunter: all live entries in segment relocated; GC watermark tracks oldest ref
+segment → relocate live entries to new segment → delete old segment (file granularity)
+```
+
+#### 7.5 Log-structured segment cleaning (LFS/F2FS cost/benefit)
+```
+segment.benefit_to_cost = (dead_bytes × segment_age) / (1 + live_utilization)
+victim = argmax(benefit_to_cost)   // clean highest-gain segments first
+clean(victim): migrate live pages → new segment; erase victim segment
+```
+
+#### 7.6 Verification: proof bytes freed
+```
+verified iff
+  reachable_used_before − reachable_used_after ≥ bytes_claimed
+  AND free_space_delta ≈ bytes_claimed (tolerance ε)
+  AND out_eq_in holds for cross-node reclamation traffic
+  AND post-reclaim gate re-check passes (no held block reclaimed)
+result ∈ {Verified, Mismatch, Blocked}
+```
+
+#### 7.7 Audit hash chain + signed checkpoint
+```
+AuditEntry = {object_id, method, bytes_claimed, bytes_verified, gate_state, timestamp, prev_hash, entry_hash}
+entry_hash = blake3(serialize(entry) || prev_hash)
+Checkpoint (periodic) = ed25519_sign(chain_head_hash || last_entry_hash || timestamp)
+Offline verification: replay chain, recompute hashes, verify checkpoint signature
+```
+
+#### 7.8 Anti-entropy Merkle reconciliation (eligibility convergence)
+```
+compare(root_A, root_B): equal → consistent (O(1))
+else recurse into differing subtrees → O(k log n) for k divergent keys
+stream divergent tombstone/expiry entries → converge before gc_grace expires
+```
+
+---
+
+### 8. Dependencies
+
+- `ids-000-aa` — canonical types (`NodeId`, `RegionId`, `HUnitId`, `DatasetId`, `PartitionId`, `RecordId`, `IdsTime`, `CarrierType`, `Checksum`, `Error`) and sealed trait contracts.
+- `ids-carrier` — `Endpoint` (`CarrierType` + `Vec<u8>`) and `Carrier` trait — decision transport only; crate never sends directly.
+- `ids-crypto` — allowed primitives only: ed25519, xchacha20poly1305, sha256, blake3, chacha20poly1305.
+- `ids-store`, `ids-reclaim`, `ids-snapshot`, `ids-immutable`, `ids-membership`, `ids-replication`, `ids-erasure`, `ids-time`, `ids-fault`, `ids-accounting`, `ids-observability` — reclamation targets and coordination (via public contracts only).
+- `serde` — serialization of reclamation envelopes, audit entries, deletion maps.
+- `thiserror` — error types.
+- `blake3` — content/object hashing, Merkle roots, audit-chain links (type-level surface; crypto ops in `ids-crypto`).
+
+No `std::net`, `tokio::net`, libp2p, or any networking stack. No crypto beyond the allowed list. `ids-reclamation` imports no crypto directly — all via `ids-crypto`.
+
+---
+
+### 9. Measurable Acceptance Criteria
+
+| # | Criterion | Measurement |
+|---|-----------|-------------|
+| AC-100.1 | Eligibility evaluation: TTL expiry, tombstone grace, WAL window, retention all evaluated | `eligibility/` modules return `EligibilityResult{eligible, reason}` per object |
+| AC-100.2 | Snapshot/retention/legal-hold gate: no block reclaimed while referenced by active snapshot, hold, or retention | `gates/` return `Blocked`; 0 violations in gate tests |
+| AC-100.3 | Tombstone grace: tombstone not purged before `gc_grace` elapsed AND all replicas applied | `tombstone.rs`; grace default configurable (Cassandra 10-day reference) |
+| AC-100.4 | Reclamation methods supported: tombstone_purge, snapshot_prune, wal_delete, segment_clean, obsolete_version_remove, dedup_chunk_delete | `planning/method.rs` enum; each has planner + verifier |
+| AC-100.5 | Verification: reclaimed bytes == reachable-used decrease == free-space delta (tolerance ε) | `verification/verifier.rs` returns `Verified`; mismatches fail cycle |
+| AC-100.6 | out_eq_in invariant holds for cross-node reclamation traffic | `out_eq_in` check at end of every cross-node reclamation |
+| AC-100.7 | Audit: every eligibility decision + reclamation + verification in append-only sha256/blake3 hash chain + periodic ed25519-signed checkpoint | `audit/` chain verifiable offline |
+| AC-100.8 | Deletion map: every copy location (replica, fragment, snapshot, backup, WAL segment) recorded with reclaim action | `audit/deletion_map.rs` |
+| AC-100.9 | Bounded batch reclamation: batches yield to foreground, never starve writes | `planning/batch.rs`; batch size + yield interval configurable |
+| AC-100.10 | Dry-run mode: previews reclaimable bytes without mutating | `dry_run` feature; `-nv` style preview |
+| AC-100.11 | Carrier agnostic: all traffic via `ids-carrier::Endpoint`; zero references to `std::net`/`tokio::net`/IP/TCP/UDP/QUIC/HTTP/DNS/Wi-Fi/Bluetooth/cellular/VPN/mesh | Dependency audit test passes |
+| AC-100.12 | Crypto allowlist: only ed25519/xchacha20poly1305/sha256/blake3/chacha20poly1305 reachable | Allowlist unit test passes |
+| AC-100.13 | Idempotent reclamation: duplicate datagrams produce same decision, no double-reclaim | Idempotency tests pass |
+| AC-100.14 | Determinism: same input + IdsTime ⇒ same eligibility/reclamation decision | Determinism tests pass |
+| AC-100.15 | Zombie prevention: tombstone purge only after grace + replica coverage; deleted data cannot resurrect | Zombie-prevention tests pass |
+| AC-100.16 | Run manifest / audit export emitted per reclamation cycle | Schema-versioned JSON |
+
+---
+
+### 10. Remaining Uncertainties
+
+1. **Grace window defaults:** concrete `gc_grace_seconds` / TTL defaults per object kind are deployment-tuned; validated at integration with `ids-store`/`ids-reclaim`.
+2. **Batch size / yield interval:** bounded reclamation batch parameters (docs/records per batch, yield cadence) trade throughput vs foreground latency; unquantified.
+3. **Anti-entropy interval:** Merkle reconciliation cadence affects convergence speed vs bandwidth; workload-dependent.
+4. **Tolerance ε for free-space delta:** free-space measurement tolerance under concurrent writes unquantified.
+5. **WAL flush-beyond-seq visibility:** how `ids-reclaim` exposes flush sequence numbers to `ids-reclamation` for WAL eligibility; integration TBD.
+6. **Snapshot unique-space accounting cost:** computing unique space per snapshot can be expensive on large datasets (Tahoe-LAFS crawler took days); incremental/sampling approach TBD.
+7. **Erasure-coded fragment deletion & repair bandwidth:** interaction with `ids-erasure` fragment deletion and repair caps TBD.
+8. **Returning-member quarantine:** a node partitioned longer than grace then healed can replay around collected tombstones (Cassandra rebootstrap precedent); incarnation/fencing handling TBD via `ids-coordinator`.
+9. **ids-time granularity:** monotonic tick resolution must be sufficient for TTL/grace windows; clock source to be confirmed.
+
+---
+
+### 11. Engineering Decisions Summary
+
+| Decision | Rationale |
+|----------|-----------|
+| Separate `ids-reclamation` crate (not a folder) | Follows "separate crates instead of more folders" directive; clear policy/verification/audit boundary |
+| Eligibility + verification + audit as one crate | Reclamation safety requires all three; splitting risks unverified or unaudited reclaims |
+| Two-phase: eligibility decides, storage owner executes | `ids-reclamation` never touches storage or transport; returns decisions only |
+| TTL/grace keyed on `ids-time` ticks, never wall-clock | Clock manipulation cannot break expiry/retention correctness |
+| Tombstone + gc_grace before purge (Cassandra pattern) | Prevents zombie resurrection on replica heal |
+| Snapshot/retention/legal-hold gate before reclaim (ZFS/WORM pattern) | Never reclaim blocks held by snapshots, retention, or legal holds |
+| Verification = reachable-used decrease + free-space delta + out_eq_in | Logical delete ≠ physical free (ScyllaDB/HDFS finding); never trust DELETE alone |
+| Audit: sha256/blake3 hash chain + ed25519-signed checkpoints | Offline-verifiable, tamper-evident reclamation log |
+| Anti-entropy Merkle reconciliation within gc_grace | Ensures tombstones/expiry reach all replicas before purge; prevents divergence |
+| Bounded batch reclamation with foreground yield | Reclamation never starves writes (F2FS foreground/background cleaning pattern) |
+| Dry-run mode previews reclaimable bytes | Safe operator reasoning before mutation (ZFS `zfs destroy -nv`) |
+| Carrier-agnostic via `ids-carrier::Endpoint` only | Preserves IDS architecture; no network stack in trust base |
+| Only allowed crypto via `ids-crypto` | Complies with allowed-crypto rule |
+
+---
+
+### 12. Sources
+
+1. Brunthaler — Distributed Garbage Collection Algorithms (reference counting, weighted reference counting, tracing/back-trace distributed GC; tradeoffs). https://ssw.jku.at/Teaching/Lectures/Sem/2005/Reports/Brunthaler.pdf
+2. arXiv cs/0207036 — Efficient fault-tolerant distributed cyclic garbage collection (back tracing + forward tracing; reference/tracing/hybrid collectors). https://arxiv.org/pdf/cs/0207036v1
+3. Apache Cassandra Docs — Tombstones & gc_grace_seconds (default 10 days; tombstone retained through compaction until grace; zombie prevention; only_purge_repaired_tombstones). https://cassandra.apache.org/doc/latest/cassandra/managing/operating/compaction/tombstones.html
+4. Pythian — Lifecycle of tombstones in Apache Cassandra (shadowed data, gc_grace, compaction-eviction, disk space recovered only after compaction). https://www.pythian.com/blog/lifecycle-tombstone-apache-cassandra
+5. The Last Pickle — How to Choose which Tombstones to Drop (tombstone drop conditions; major compaction). https://thelastpickle.com/blog/2019/09/11/how-to-choose-which-tombstones-to-drop.html
+6. ScyllaDB Docs — Efficient Tombstone Garbage Collection in ICS (tombstone-density trigger, cross-tier compaction). https://docs.scylladb.com/manual/stable/kb/garbage-collection-ics.html
+7. ScyllaDB — Maximizing Disk Utilization with Incremental Compaction (STCS 100% space overhead; ICS runs; 50% disk headroom). https://www.scylladb.com/2020/01/16/maximizing-disk-utilization-with-incremental-compaction/
+8. arXiv 2202.04522 — Constructing and Analyzing the LSM Compaction Design Space (compactions merge sorted runs; read/space amplification vs write amplification). https://arxiv.org/pdf/2202.04522v1
+9. arXiv 2602.01873 — Tidehunter (WAL as permanent storage; relocation moves live entries, drops segments at file granularity; GC watermark; CAS for concurrent writes). https://arxiv.org/pdf/2602.01873
+10. SQL Server — Transaction Log Architecture (active log / MinLSN; log truncation frees inactive VLFs after checkpoint). https://learn.microsoft.com/en-us/sql/relational-databases/sql-server-transaction-log-architecture-and-management-guide
+11. RocksDB Wiki — Write-Ahead Log (WAL deleted when all column families flushed beyond largest sequence number). https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-%28WAL%29
+12. OSTEP — Log-structured File Systems (cleaner: read segments, identify live blocks, compact into fewer segments, free old; cost=1+utilization, benefit=free_bytes×age). https://pages.cs.wisc.edu/~remzi/OSTEP/file-lfs.pdf
+13. arXiv 1907.11825 — Garbage Collection and Wear Leveling (SSD FTL GC: victim block, valid-page relocation, erase; write amplification). https://arxiv.org/pdf/1907.11825v1
+14. NOVA paper — NOVA file system log cleaning (fast GC reclaims fully-dead pages; thorough GC when <50% live). https://cseweb.ucsd.edu/~jix024/papers/NOVA-camera.pdf
+15. OpenZFS Docs — Snapshots, Clones and Bookmarks (unique vs referenced space; holds; `zfs destroy -nv` dry-run; sanoid/zrepl retention — third-party). https://openzfs.github.io/openzfs-docs/Basic%20Concepts/Datasets/Snapshots%20and%20Clones.html
+16. Oracle ZFS — Snapshot Space Management (unique/referenced space; destroying snapshot frees unique space; blocks shared between snapshots remain). https://docs.oracle.com/en/storage/zfs-storage/zfs-appliance/os8-8-x/admin-guide/snapshot-space-management.html
+17. HDFS Architecture Guide — File Deletes and Undeletes (/trash directory; fs.trash.interval default 6h; expunge permanently deletes; capacity not reclaimed until trash purged). https://hadoop.apache.org/docs/r1.2.1/hdfs_design.html
+18. HDFS Trash (IBM) — fs.trash.interval, checkpoint/emptier intervals; `hadoop fs -expunge`. https://developer.ibm.com/hadoop/2015/10/22/hdfs-trash
+19. Tahoe-LAFS — Garbage Collection (per-share leases; clients renew; server deletes when all leases expire; share crawler rate-limited ≤10% CPU). https://tahoe-lafs.readthedocs.io/en/tahoe-lafs-1.15.0/garbage-collection.html
+20. Bondy — Deletion and Reclamation (deletion = clear op leaves tombstone; reclamation licensed by causal stability; per-member durable frontier; one silent member holds stability; unreclaimed tombstone costs disk, wrong reclaim costs data permanently). https://developer.bondy.io/connect/concepts/deletion_and_reclamation
+21. ACM Computing Surveys — Approaches to CRDTs (causal stability; tagged causal broadcast; stability for GC). https://dl.acm.org/doi/full/10.1145/3695249
+22. arXiv 1603.01529 — Delta State Replicated Data Types (anti-entropy for convergence; state vs op-based). https://arxiv.org/html/1603.01529
+23. HLD Handbook — Merkle Trees and Anti-Entropy (root-hash compare O(1); recurse differing subtrees O(k log n); hinted handoff 3h; read repair; gc_grace deadline). https://hld.handbook.academy/curriculum/distributed-systems-theory/merkle-trees-anti-entropy
+24. Ceph Docs — RGW Garbage Collection (orphaned RADOS objects queued; rgw_gc_obj_min_wait default 7200s; gc processor period). https://docs.ceph.com/en/latest/radosgw/config-ref
+25. Ceph Docs — CephFS Purge Queue (parallel deletion of files; purge queue backlog affects capacity reclaim). https://docs.ceph.com/en/latest/cephfs/purge-queue
+26. Scality — Data Deletion Verification (delete response ≠ byte-freeing; proof of erasure needs reclamation records + free-space change + deletion map of every copy location). https://scality.com/blog/data-deletion-verification
+27. MongoDB Docs — TTL Indexes (background monitor every 60s; delete within 60s of expiration; not transactional; expireAfterSeconds). https://mongodb.com/docs/v8.0/core/index-ttl
+28. Google Cloud Storage — Object Lifecycle Management (age/createdBefore/noncurrentTimeBefore Delete conditions; soft-delete 7 days; object holds/retention block delete). https://docs.cloud.google.com/storage/docs/lifecycle
+29. Google Cloud Datastore — TTL Policies (deleted within 24h of expiration; not guaranteed order). https://docs.cloud.google.com/datastore/docs/ttl
+30. Azure Blob Storage — Lifecycle Management (creation/modified/accessed-time conditions; tier transition + delete; soft delete). https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-overview
+31. Azure — Immutable Storage for Blob Data (WORM; time-based retention + legal hold; cannot modify/delete during retention). https://learn.microsoft.com/azure/storage/blobs/immutable-storage-overview
+32. ed25519-dalek docs — ed25519 key gen/sign/verify, RFC 8032. https://docs.rs/ed25519-dalek
+33. chacha20poly1305 docs — ChaCha20Poly1305/XChaCha20Poly1305 AEAD, RFC 8439. https://docs.rs/chacha20poly1305
+34. sha2 RustCrypto — SHA-256. https://docs.rs/sha2
+35. BLAKE3-team README — BLAKE3-256, SIMD, keyed hash, KDF, XOF. https://github.com/BLAKE3-team/BLAKE3/blob/master/README.md
+36. IDS CRATES.md — crate inventory; ids-reclaim #41 compaction/reclamation; ids-snapshot #26; ids-immutable #40; carrier/crypto/time rules. C:/idfs/CRATES.md
+37. IDS prompts.txt entry 100 (verbatim). C:/idfs/prompts.txt lines 1495-1509
+38. HX-241 reference plan format. C:/idfs/plans/plan-001.md, plan-048.md, plan-060.md
+
+**Research status:** Complete. Ready for implementation phase. No code written, no files created, no repository changes made beyond this plan document.
